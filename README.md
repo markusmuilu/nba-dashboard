@@ -4,6 +4,24 @@ A Streamlit dashboard for analysing NBA game predictions, model performance,
 team stats, upset patterns, and betting simulation — backed by data stored in
 Cloudflare R2.
 
+## Tabs
+
+| # | Tab | What it shows |
+|---|-----|---------------|
+| 1 | **Overview** | KPIs, rolling accuracy, today's predictions, full history table |
+| 2 | **Model Performance** | Classification metrics by version, calibration chart, confusion matrix, baseline comparison |
+| 3 | **Teams** | Per-team accuracy, P&L, ROI, form guide, H2H breakdown, prediction history with odds |
+| 4 | **Upset Analysis** | Favourite vs underdog model accuracy, implied probability scatter, upset KPIs |
+| 5 | **Odds & Betting** | Flat-stake P&L simulation, cumulative profit chart, drawdown, monthly summary |
+
+## Sidebar filters
+
+- **Date range** — restricts all tabs to the selected window
+- **Model version** — multi-select (Logistic reg V1, V2.1, Custom NN V1, V2.2)
+- **Season type** — Regular Season / Play-In / Playoffs
+
+---
+
 ## Local development
 
 ```bash
@@ -125,6 +143,8 @@ Array of today's unresolved predictions (no `winner` / `prediction_correct`):
 }
 ```
 
+---
+
 ## Model versions
 
 | Date range | Version |
@@ -133,3 +153,33 @@ Array of today's unresolved predictions (no `winner` / `prediction_correct`):
 | 2025-12-06 – 2025-12-14 | Logistic reg V2.1 |
 | 2025-12-15 – 2026-01-08 | Custom NN V1 |
 | 2026-01-09 onwards | Logistic reg V2.2 |
+
+Version change lines are rendered as dotted vertical annotations on the Overview
+rolling accuracy chart and the Odds & Betting cumulative profit chart.
+
+---
+
+## Betting simulation methodology
+
+- **Stake:** flat €1 per game (only games where both home and away odds are available)
+- **P&L per game:** `odds × €1 − €1` if prediction correct, else `−€1`
+- **ROI %:** `net profit ÷ total staked × 100`
+- **Strategies compared:** Model · Against model · Always home · Always favourite
+- **Max drawdown:** largest peak-to-trough loss on the cumulative P&L curve
+
+---
+
+## Season type classification
+
+| Type | Date range |
+|---|---|
+| Regular Season | Oct – mid Apr (before Play-In) |
+| Play-In | ~Apr 14–18 |
+| Playoffs | Apr 19 onwards |
+
+Exact start dates per season:
+
+| Season | Play-In start | Playoffs start |
+|---|---|---|
+| 2024–25 | 2025-04-15 | 2025-04-19 |
+| 2025–26 | 2026-04-14 | 2026-04-19 |
