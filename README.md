@@ -4,6 +4,24 @@ A Streamlit dashboard for analysing NBA game predictions, model performance,
 team stats, upset patterns, and betting simulation — backed by data stored in
 Cloudflare R2.
 
+## Project Evolution
+
+This dashboard is the **V2 analytics layer** for the NBA prediction project.
+
+### V1 — Power BI (Nov 2025 – Apr 2026)
+The original analytics layer was a Power BI dashboard embedded directly in the portfolio website. It visualised the same prediction data but required a Power BI Pro licence.
+
+### V2 — Streamlit (Apr 2026–present)
+When the Power BI free trial ended, the dashboard was rebuilt from scratch in Streamlit. Benefits:
+- Permanently free on Streamlit Community Cloud
+- Full code ownership and version control
+- Tighter integration with the Cloudflare R2 data schema
+- Custom visualisations using Plotly (calibration charts, drawdown curves, upset scatter)
+
+The Streamlit dashboard is embedded via iframe in the portfolio at [markusmuilu.page](https://markusmuilu.page).
+
+---
+
 ## Tabs
 
 | # | Tab | What it shows |
