@@ -450,6 +450,13 @@ def _normalise(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df["team"] != "NO_GAMES_TODAY"].copy()
 
+    # Filter out All-Star games (team names contain "star" or are non-standard)
+    allstar_mask = (
+        df["team"].str.contains("star", case=False, na=False) |
+        df["opponent"].str.contains("star", case=False, na=False)
+    )
+    df = df[~allstar_mask].copy()
+
     # Guard: all rows were sentinel rows
     if df.empty:
         return pd.DataFrame(columns=EXPECTED_COLS)
@@ -459,7 +466,10 @@ def _normalise(df: pd.DataFrame) -> pd.DataFrame:
     df["season_type"]   = df["date"].apply(_get_season_type)
     df["home_odds"]     = pd.to_numeric(df.get("home_odds", np.nan), errors="coerce")
     df["away_odds"]     = pd.to_numeric(df.get("away_odds", np.nan), errors="coerce")
-    df["predicted_winner"] = df.apply(lambda r: r["team"] if r["prediction"] else r["opponent"], axis=1)
+    df["predicted_winner"] = np.where(
+        df["prediction"].isna(), np.nan,
+        np.where(df["prediction"], df["team"], df["opponent"])
+    )
     # Implied probability from odds (1/odds, normalised to remove bookmaker margin)
     mask = df["home_odds"].notna() & df["away_odds"].notna()
     if mask.any():
@@ -469,12 +479,50 @@ def _normalise(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _compute_better_record_baseline(df: pd.DataFrame) -> pd.DataFrame:
+    """Pick the team with the better cumulative win % going into each game.
+    Home team wins ties. Builds running tallies game-by-game in date order.
+    Returns a DataFrame with baseline_correct and baseline_picks_home columns."""
+    df_sorted = df.sort_values("date")
+    records: dict = {}  # team -> [wins, games]
+    baseline_correct: dict = {}
+    baseline_picks_home: dict = {}
+
+    for idx, row in df_sorted.iterrows():
+        home, away = row["team"], row["opponent"]
+        winner = row.get("winner")
+
+        hw, hg = records.get(home, [0, 0])
+        aw, ag = records.get(away, [0, 0])
+        home_pct = hw / hg if hg > 0 else 0.5
+        away_pct = aw / ag if ag > 0 else 0.5
+
+        picks_home = home_pct >= away_pct  # ties go to home
+        baseline_picks_home[idx] = picks_home
+
+        if pd.notna(winner):
+            baseline_correct[idx] = picks_home == bool(winner)
+            records[home] = [hw + int(bool(winner)), hg + 1]
+            records[away] = [aw + int(not bool(winner)), ag + 1]
+        else:
+            baseline_correct[idx] = np.nan
+
+    return pd.DataFrame({
+        "baseline_correct":    pd.Series(baseline_correct),
+        "baseline_picks_home": pd.Series(baseline_picks_home),
+    })
+
+
 @st.cache_data(ttl=300)
 def load_history() -> pd.DataFrame:
     bucket = os.environ.get("R2_BUCKET_NAME") or st.secrets.get("R2_BUCKET_NAME", "nbaprediction")
     obj = _r2_client().get_object(Bucket=bucket, Key="history/prediction_history.json")
     df  = pd.DataFrame(json.loads(obj["Body"].read()))
-    return _normalise(df)
+    df  = _normalise(df)
+    bl  = _compute_better_record_baseline(df)
+    df["baseline_correct"]    = bl["baseline_correct"]
+    df["baseline_picks_home"] = bl["baseline_picks_home"]
+    return df
 
 
 @st.cache_data(ttl=300)
@@ -593,15 +641,16 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 # TAB 1 — OVERVIEW
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
-    total:     int   = len(hist)
-    correct:   int   = int(hist["prediction_correct"].sum()) if total else 0
+    ml_hist = hist.dropna(subset=["prediction_correct"])
+    total:     int   = len(ml_hist)
+    correct:   int   = int(ml_hist["prediction_correct"].sum()) if total else 0
     accuracy:  float = correct / total * 100 if total else 0.0
-    home_win_pct: float = hist["winner"].mean() * 100 if total else 0.0
-    earliest = hist["date"].min().strftime("%Y-%m-%d") if total else "—"
-    latest   = hist["date"].max().strftime("%Y-%m-%d") if total else "—"
+    home_win_pct: float = hist["winner"].mean() * 100 if len(hist) else 0.0
+    earliest = ml_hist["date"].min().strftime("%Y-%m-%d") if total else "—"
+    latest   = ml_hist["date"].max().strftime("%Y-%m-%d") if total else "—"
 
     # 30-day accuracy for delta context
-    last30 = hist[hist["date"] >= (hist["date"].max() - pd.Timedelta(days=30))]
+    last30 = ml_hist[ml_hist["date"] >= (ml_hist["date"].max() - pd.Timedelta(days=30))]
     acc30  = last30["prediction_correct"].mean() * 100 if len(last30) else accuracy
     delta_acc = acc30 - accuracy
     delta_str = f"{'▲' if delta_acc >= 0 else '▼'} {abs(delta_acc):.1f}% vs overall (30-day)"
@@ -610,7 +659,7 @@ with tab1:
     # Current streak
     streak_val, streak_type = 0, ""
     if total:
-        recent = hist.sort_values("date")["prediction_correct"].tolist()
+        recent = ml_hist.sort_values("date")["prediction_correct"].tolist()
         streak_val = 1
         streak_type = "W" if recent[-1] else "L"
         for r in reversed(recent[:-1]):
@@ -648,7 +697,7 @@ with tab1:
     if total:
         section_header("Volume & Rolling Accuracy", "· 7-day window")
         daily = (
-            hist.groupby(hist["date"].dt.date)
+            ml_hist.groupby(ml_hist["date"].dt.date)
             .agg(total_preds=("prediction_correct","count"), correct_preds=("prediction_correct","sum"))
             .reset_index().rename(columns={"date":"ds"}).sort_values("ds")
         )
@@ -727,8 +776,9 @@ with tab2:
         st.markdown('<div class="empty-state"><div class="icon">🔍</div>No data after applying filters.</div>', unsafe_allow_html=True)
     else:
         # ── Per-version metrics ───────────────────────────────────────────────
+        ml_hist2 = hist.dropna(subset=["prediction_correct"])
         rows = []
-        for ver, grp in hist.groupby("model_version"):
+        for ver, grp in ml_hist2.groupby("model_version"):
             y_true = grp["winner"].astype(int).tolist()
             y_pred = grp["prediction"].astype(int).tolist()
             acc  = grp["prediction_correct"].mean() * 100
@@ -855,13 +905,15 @@ with tab2:
         # ── Model vs baselines ────────────────────────────────────────────────
         divider()
         section_header("Model vs Baselines", "· how does the model compare to simple strategies?")
-        overall_acc   = hist["prediction_correct"].mean() * 100
+        ml_hist3      = hist.dropna(subset=["prediction_correct"])
+        overall_acc   = ml_hist3["prediction_correct"].mean() * 100
         home_baseline = hist["winner"].mean() * 100
         away_baseline = (1 - hist["winner"].mean()) * 100
+        better_record_acc = hist["baseline_correct"].mean() * 100
 
-        base_labels  = ["Model", "Always home", "Always away"]
-        base_values  = [overall_acc, home_baseline, away_baseline]
-        base_colours = ["#3b82f6", "#94a3b8", "#a78bfa"]
+        base_labels  = ["Model", "Better record", "Always home", "Always away"]
+        base_values  = [overall_acc, better_record_acc, home_baseline, away_baseline]
+        base_colours = ["#3b82f6", "#22d3ee", "#94a3b8", "#a78bfa"]
 
         fig_base = go.Figure(go.Bar(
             x=base_values, y=base_labels, orientation="h",
@@ -873,7 +925,7 @@ with tab2:
         fig_base.add_vline(x=50, line_dash="dot", line_color="rgba(148,163,184,0.25)")
         fig_base.update_layout(**PLOTLY_LAYOUT, xaxis_range=[0, 110],
                                 xaxis_title="Accuracy %", yaxis_title="",
-                                showlegend=False, height=260)
+                                showlegend=False, height=300)
         st.plotly_chart(fig_base, width='stretch')
 
 
@@ -1159,17 +1211,26 @@ with tab5:
             return profit(1, fav_odds, fav_correct)
         odds_df["profit_fav"] = odds_df.apply(_profit_fav, axis=1)
 
+        def _profit_rec(r):
+            if pd.isna(r.get("baseline_correct")):
+                return 0.0
+            rec_odds = r["home_odds"] if bool(r["baseline_picks_home"]) else r["away_odds"]
+            return profit(1, rec_odds, bool(r["baseline_correct"]))
+        odds_df["profit_record"] = odds_df.apply(_profit_rec, axis=1)
+
         # Daily aggregation
         daily_pnl = (
             odds_df.groupby(odds_df["date"].dt.date)
             .agg(pnl_model=("profit_model","sum"), pnl_against=("profit_against","sum"),
-                 pnl_home=("profit_home","sum"), pnl_fav=("profit_fav","sum"))
+                 pnl_home=("profit_home","sum"), pnl_fav=("profit_fav","sum"),
+                 pnl_record=("profit_record","sum"))
             .reset_index().rename(columns={"date":"ds"}).sort_values("ds")
         )
         daily_pnl["cum_model"]   = daily_pnl["pnl_model"].cumsum()
         daily_pnl["cum_against"] = daily_pnl["pnl_against"].cumsum()
         daily_pnl["cum_home"]    = daily_pnl["pnl_home"].cumsum()
         daily_pnl["cum_fav"]     = daily_pnl["pnl_fav"].cumsum()
+        daily_pnl["cum_record"]  = daily_pnl["pnl_record"].cumsum()
 
         n_odds        = len(odds_df)
         correct_odds  = int(odds_df["prediction_correct"].sum())
@@ -1179,6 +1240,7 @@ with tab5:
         roi_against = daily_pnl["cum_against"].iloc[-1] / total_staked * 100
         roi_home    = daily_pnl["cum_home"].iloc[-1]    / total_staked * 100
         roi_fav     = daily_pnl["cum_fav"].iloc[-1]     / total_staked * 100
+        roi_record  = daily_pnl["cum_record"].iloc[-1]  / total_staked * 100
 
         # Max drawdown: largest peak-to-trough drop on the cumulative curve
         def max_drawdown(cum_series):
@@ -1189,6 +1251,7 @@ with tab5:
         dd_against = max_drawdown(daily_pnl["cum_against"])
         dd_home    = max_drawdown(daily_pnl["cum_home"])
         dd_fav     = max_drawdown(daily_pnl["cum_fav"])
+        dd_record  = max_drawdown(daily_pnl["cum_record"])
 
         # Best/worst single day
         best_day  = daily_pnl.loc[daily_pnl["pnl_model"].idxmax()]
@@ -1214,19 +1277,21 @@ with tab5:
         with c[5]: kpi("Correct predictions", f"{correct_odds:,}",
                         tooltip="Number of model predictions that were correct, on games where odds are available.")
 
-        c2 = st.columns(4)
+        c2 = st.columns(5)
         with c2[0]: kpi("Total wagered", f"€{total_staked:,}",
                          tooltip="Total amount staked across all games (€1 per game).")
         with c2[1]: kpi("Always-fav ROI %", f"{roi_fav:+.1f}%", color="green" if roi_fav>0 else "red",
                          tooltip="What you'd earn by always betting on the market favourite (lower decimal odds). "
                                  "This is the market benchmark — beating it means the model adds value beyond just picking favourites.")
-        with c2[2]: kpi("Best day (model)", f"€{best_day['pnl_model']:+.2f}",
+        with c2[2]: kpi("Better-record ROI %", f"{roi_record:+.1f}%", color="green" if roi_record>0 else "red",
+                         tooltip="What you'd earn by always betting on the team with the better season record going into each game. Ties go to home team.")
+        with c2[3]: kpi("Best day (model)", f"€{best_day['pnl_model']:+.2f}",
                          delta=str(best_day['ds']), delta_dir="pos")
-        with c2[3]: kpi("Worst day (model)", f"€{worst_day['pnl_model']:+.2f}",
+        with c2[4]: kpi("Worst day (model)", f"€{worst_day['pnl_model']:+.2f}",
                          delta=str(worst_day['ds']), delta_dir="neg")
 
         # Auto-insight
-        strategies = [("Model", roi_model), ("Against-model", roi_against), ("Always-home", roi_home), ("Always-fav", roi_fav)]
+        strategies = [("Model", roi_model), ("Against-model", roi_against), ("Always-home", roi_home), ("Always-fav", roi_fav), ("Better-record", roi_record)]
         best_strategy = max(strategies, key=lambda x: x[1])
         if best_strategy[1] > 0:
             insight(f"Best strategy over this period: <b>{best_strategy[0]}</b> with <b>{best_strategy[1]:+.1f}%</b> ROI "
@@ -1249,6 +1314,8 @@ with tab5:
                                       name="Always home", line=dict(color="#34d399", width=2), mode="lines"))
         fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_fav"],
                                       name="Always favourite", line=dict(color="#fbbf24", width=2, dash="dot"), mode="lines"))
+        fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_record"],
+                                      name="Better record", line=dict(color="#22d3ee", width=2, dash="dot"), mode="lines"))
         fig_bet.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.3)", annotation_text="Break even")
         _annotate_chart(fig_bet, daily_pnl["ds"].min(), daily_pnl["ds"].max())
         fig_bet.update_layout(**PLOTLY_LAYOUT, xaxis_title="Date", yaxis_title="Cumulative profit (€)",
@@ -1259,7 +1326,8 @@ with tab5:
         section_header("Daily P&L by Strategy")
         fig_bar = go.Figure()
         for col, name, color in [("pnl_model","Model","#3b82f6"),("pnl_against","Against model","#f472b6"),
-                                   ("pnl_home","Always home","#34d399"),("pnl_fav","Always favourite","#fbbf24")]:
+                                   ("pnl_home","Always home","#34d399"),("pnl_fav","Always favourite","#fbbf24"),
+                                   ("pnl_record","Better record","#22d3ee")]:
             fig_bar.add_trace(go.Bar(x=daily_pnl["ds"], y=daily_pnl[col], name=name, marker_color=color, opacity=0.75))
         fig_bar.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.3)")
         fig_bar.update_layout(**PLOTLY_LAYOUT, barmode="group", xaxis_title="Date", yaxis_title="Daily profit (€)",
@@ -1277,6 +1345,7 @@ with tab5:
                  pnl_model=("profit_model","sum"),
                  pnl_against=("profit_against","sum"),
                  pnl_home=("profit_home","sum"),
+                 pnl_record=("profit_record","sum"),
                  correct=("prediction_correct","sum"))
             .reset_index()
         )
@@ -1285,16 +1354,17 @@ with tab5:
         monthly["pnl_model"]   = monthly["pnl_model"].round(2)
         monthly["pnl_against"] = monthly["pnl_against"].round(2)
         monthly["pnl_home"]    = monthly["pnl_home"].round(2)
-        monthly.columns = ["Month","Games","P&L Model €","P&L Against €","P&L Home €","Correct","Accuracy %","Model ROI %"]
-        monthly = monthly[["Month","Games","Accuracy %","Model ROI %","P&L Model €","P&L Against €","P&L Home €"]]
+        monthly["pnl_record"]  = monthly["pnl_record"].round(2)
+        monthly.columns = ["Month","Games","P&L Model €","P&L Against €","P&L Home €","P&L Record €","Correct","Accuracy %","Model ROI %"]
+        monthly = monthly[["Month","Games","Accuracy %","Model ROI %","P&L Model €","P&L Against €","P&L Home €","P&L Record €"]]
         st.dataframe(monthly.sort_values("Month", ascending=False), width='stretch', hide_index=True)
 
         divider()
 
         # ── Per-game P&L table ────────────────────────────────────────────────
         section_header("Per-game P&L")
-        pnl = odds_df[["date","team","opponent","predicted_winner","confidence","prediction_correct","profit_model","profit_against","profit_home"]].copy()
+        pnl = odds_df[["date","team","opponent","predicted_winner","confidence","prediction_correct","profit_model","profit_against","profit_home","profit_record"]].copy()
         pnl["date"] = pnl["date"].dt.strftime("%Y-%m-%d")
         pnl["prediction_correct"] = pnl["prediction_correct"].map({True:"✅", False:"❌"})
-        pnl.columns = ["Date","Home","Away","Predicted Winner","Conf %","Correct","P&L Model €","P&L Against €","P&L Home €"]
+        pnl.columns = ["Date","Home","Away","Predicted Winner","Conf %","Correct","P&L Model €","P&L Against €","P&L Home €","P&L Record €"]
         st.dataframe(pnl.sort_values("Date", ascending=False), width='stretch', hide_index=True)
