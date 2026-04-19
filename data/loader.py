@@ -2,18 +2,34 @@ import os
 import json
 
 import boto3
+import botocore.config
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from config.constants import model_version, get_season_type
 
+_R2_CLIENT = None
 
 def _r2_client():
-    endpoint   = os.environ.get("R2_ENDPOINT")          or st.secrets.get("R2_ENDPOINT", "")
-    access_key = os.environ.get("R2_ACCESS_KEY_ID")     or st.secrets.get("R2_ACCESS_KEY_ID", "")
-    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY") or st.secrets.get("R2_SECRET_ACCESS_KEY", "")
-    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+    global _R2_CLIENT
+    if _R2_CLIENT is None:
+        endpoint   = os.environ.get("R2_ENDPOINT")          or st.secrets.get("R2_ENDPOINT", "")
+        access_key = os.environ.get("R2_ACCESS_KEY_ID")     or st.secrets.get("R2_ACCESS_KEY_ID", "")
+        secret_key = os.environ.get("R2_SECRET_ACCESS_KEY") or st.secrets.get("R2_SECRET_ACCESS_KEY", "")
+        config = botocore.config.Config(
+            connect_timeout=5,
+            read_timeout=15,
+            retries={"max_attempts": 2},
+        )
+        _R2_CLIENT = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=config,
+        )
+    return _R2_CLIENT
 
 
 def _normalise(df: pd.DataFrame) -> pd.DataFrame:
