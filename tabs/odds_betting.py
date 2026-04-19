@@ -6,10 +6,30 @@ from ui.charts import PLOTLY_LAYOUT, annotate_chart
 from ui.components import divider, insight, kpi, section_header
 from ui.components import profit as calc_profit
 
+_BUCKET_BINS   = [49, 60, 70, 80, 90, 101]
+_BUCKET_LABELS = ["50–60", "61–70", "71–80", "81–90", "90+"]
+
 
 def _max_drawdown(cum_series: pd.Series) -> float:
     running_max = cum_series.cummax()
     return (cum_series - running_max).min()
+
+
+def _daily_cumulative(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate a profit-column df by date and return cumulative sums."""
+    daily = (
+        df.groupby(df["date"].dt.date)
+        .agg(pnl_model=("profit_model", "sum"), pnl_against=("profit_against", "sum"),
+             pnl_home=("profit_home", "sum"), pnl_fav=("profit_fav", "sum"),
+             pnl_record=("profit_record", "sum"))
+        .reset_index().rename(columns={"date": "ds"}).sort_values("ds")
+    )
+    daily["cum_model"]   = daily["pnl_model"].cumsum()
+    daily["cum_against"] = daily["pnl_against"].cumsum()
+    daily["cum_home"]    = daily["pnl_home"].cumsum()
+    daily["cum_fav"]     = daily["pnl_fav"].cumsum()
+    daily["cum_record"]  = daily["pnl_record"].cumsum()
+    return daily
 
 
 def render(hist: pd.DataFrame) -> None:
@@ -21,6 +41,7 @@ def render(hist: pd.DataFrame) -> None:
 
     odds_df = odds_df.sort_values("date")
 
+    # ── Compute profit columns ────────────────────────────────────────────────
     odds_df["profit_model"]   = odds_df.apply(
         lambda r: calc_profit(1, r["home_odds"] if r["prediction"] else r["away_odds"], r["prediction_correct"]), axis=1
     )
@@ -45,20 +66,14 @@ def render(hist: pd.DataFrame) -> None:
         return calc_profit(1, rec_odds, bool(r["baseline_correct"]))
     odds_df["profit_record"] = odds_df.apply(_profit_rec, axis=1)
 
-    # Daily aggregation
-    daily_pnl = (
-        odds_df.groupby(odds_df["date"].dt.date)
-        .agg(pnl_model=("profit_model", "sum"), pnl_against=("profit_against", "sum"),
-             pnl_home=("profit_home", "sum"), pnl_fav=("profit_fav", "sum"),
-             pnl_record=("profit_record", "sum"))
-        .reset_index().rename(columns={"date": "ds"}).sort_values("ds")
+    # ── Confidence bucket column ──────────────────────────────────────────────
+    odds_df["conf_bucket"] = pd.cut(
+        (odds_df["confidence"] + 0.5).astype(int),
+        bins=_BUCKET_BINS, labels=_BUCKET_LABELS, right=True,
     )
-    daily_pnl["cum_model"]   = daily_pnl["pnl_model"].cumsum()
-    daily_pnl["cum_against"] = daily_pnl["pnl_against"].cumsum()
-    daily_pnl["cum_home"]    = daily_pnl["pnl_home"].cumsum()
-    daily_pnl["cum_fav"]     = daily_pnl["pnl_fav"].cumsum()
-    daily_pnl["cum_record"]  = daily_pnl["pnl_record"].cumsum()
 
+    # ── KPIs (always full dataset, no bucket filter) ──────────────────────────
+    daily_pnl     = _daily_cumulative(odds_df)
     n_odds        = len(odds_df)
     correct_odds  = int(odds_df["prediction_correct"].sum())
     earliest_odds = odds_df["date"].min().strftime("%Y-%m-%d")
@@ -69,11 +84,9 @@ def render(hist: pd.DataFrame) -> None:
     roi_fav     = daily_pnl["cum_fav"].iloc[-1]     / total_staked * 100
     roi_record  = daily_pnl["cum_record"].iloc[-1]  / total_staked * 100
 
-    dd_model   = _max_drawdown(daily_pnl["cum_model"])
-    dd_against = _max_drawdown(daily_pnl["cum_against"])
-    dd_home    = _max_drawdown(daily_pnl["cum_home"])
-    dd_fav     = _max_drawdown(daily_pnl["cum_fav"])
-    dd_record  = _max_drawdown(daily_pnl["cum_record"])
+    dd_model  = _max_drawdown(daily_pnl["cum_model"])
+    dd_fav    = _max_drawdown(daily_pnl["cum_fav"])
+    dd_record = _max_drawdown(daily_pnl["cum_record"])
 
     best_day  = daily_pnl.loc[daily_pnl["pnl_model"].idxmax()]
     worst_day = daily_pnl.loc[daily_pnl["pnl_model"].idxmin()]
@@ -81,7 +94,7 @@ def render(hist: pd.DataFrame) -> None:
     section_header("Betting KPIs", f"· {n_odds:,} games with odds · €1 flat stake")
     st.caption(
         "Simulation assumes a flat €1 stake on every game where odds are available. "
-        "**P&L** (profit & loss) per game = odds × €1 − €1 if correct, else −€1. "
+        "**P&L** (profit & loss) per game = odds × €1 − €1 if correct, else −€1."
     )
     c = st.columns(6)
     with c[0]: kpi("Odds tracking since", earliest_odds,
@@ -121,27 +134,52 @@ def render(hist: pd.DataFrame) -> None:
 
     divider()
 
-    # ── Cumulative profit chart ────────────────────────────────────────────────
+    # ── Cumulative profit chart with bucket filter ────────────────────────────
     section_header("Cumulative Profit", "· daily aggregated · €1 per game")
-    fig_bet = go.Figure()
-    fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_model"],
-                                  name="Model", line=dict(color="#3b82f6", width=2.5), mode="lines",
-                                  fill="tozeroy", fillcolor="rgba(59,130,246,0.06)"))
-    fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_against"],
-                                  name="Against model", line=dict(color="#f472b6", width=2), mode="lines"))
-    fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_home"],
-                                  name="Always home", line=dict(color="#34d399", width=2), mode="lines"))
-    fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_fav"],
-                                  name="Always favourite", line=dict(color="#fbbf24", width=2, dash="dot"), mode="lines"))
-    fig_bet.add_trace(go.Scatter(x=daily_pnl["ds"], y=daily_pnl["cum_record"],
-                                  name="Better record", line=dict(color="#22d3ee", width=2, dash="dot"), mode="lines"))
-    fig_bet.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.3)", annotation_text="Break even")
-    annotate_chart(fig_bet, daily_pnl["ds"].min(), daily_pnl["ds"].max())
-    fig_bet.update_layout(**PLOTLY_LAYOUT, xaxis_title="Date", yaxis_title="Cumulative profit (€)",
-                           legend=dict(bgcolor="#0f172a", orientation="h", x=0, y=1.08))
-    st.plotly_chart(fig_bet, width='stretch')
+    st.caption("Filter by confidence bucket to see how each tier performs across strategies.")
+
+    bcols = st.columns(len(_BUCKET_LABELS))
+    sel_buckets = [
+        label for label, col in zip(_BUCKET_LABELS, bcols)
+        if col.checkbox(label, value=True, key=f"cum_bucket_{label}")
+    ]
+
+    if not sel_buckets:
+        st.info("Select at least one confidence bucket to display the chart.")
+    else:
+        chart_df  = odds_df[odds_df["conf_bucket"].isin(sel_buckets)]
+        chart_pnl = _daily_cumulative(chart_df)
+        n_bucket  = len(chart_df)
+
+        fig_bet = go.Figure()
+        fig_bet.add_trace(go.Scatter(x=chart_pnl["ds"], y=chart_pnl["cum_model"],
+                                      name="Model", line=dict(color="#3b82f6", width=2.5), mode="lines",
+                                      fill="tozeroy", fillcolor="rgba(59,130,246,0.06)"))
+        fig_bet.add_trace(go.Scatter(x=chart_pnl["ds"], y=chart_pnl["cum_against"],
+                                      name="Against model", line=dict(color="#f472b6", width=2), mode="lines"))
+        fig_bet.add_trace(go.Scatter(x=chart_pnl["ds"], y=chart_pnl["cum_home"],
+                                      name="Always home", line=dict(color="#34d399", width=2), mode="lines"))
+        fig_bet.add_trace(go.Scatter(x=chart_pnl["ds"], y=chart_pnl["cum_fav"],
+                                      name="Always favourite", line=dict(color="#fbbf24", width=2, dash="dot"), mode="lines"))
+        fig_bet.add_trace(go.Scatter(x=chart_pnl["ds"], y=chart_pnl["cum_record"],
+                                      name="Better record", line=dict(color="#22d3ee", width=2, dash="dot"), mode="lines"))
+        fig_bet.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.3)", annotation_text="Break even")
+        annotate_chart(fig_bet, chart_pnl["ds"].min(), chart_pnl["ds"].max())
+        fig_bet.update_layout(
+            **PLOTLY_LAYOUT,
+            xaxis_title="Date", yaxis_title="Cumulative profit (€)",
+            legend=dict(bgcolor="#0f172a", orientation="h", x=0, y=1.08),
+            hovermode="x unified",
+        )
+        fig_bet.update_xaxes(
+            showspikes=True, spikemode="across", spikesnap="cursor",
+            spikethickness=1, spikecolor="rgba(148,163,184,0.35)", spikedash="dot",
+        )
+        st.plotly_chart(fig_bet, width='stretch')
+        st.caption(f"Showing {n_bucket:,} games in selected bucket(s): {', '.join(sel_buckets)}")
 
     # ── Daily P&L bar chart ────────────────────────────────────────────────────
+    divider()
     section_header("Daily P&L by Strategy")
     fig_bar = go.Figure()
     for col, name, color in [("pnl_model", "Model", "#3b82f6"), ("pnl_against", "Against model", "#f472b6"),

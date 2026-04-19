@@ -5,8 +5,12 @@ from config.constants import VERSION_BADGE_CLASS
 
 def kpi(label: str, value: str, color: str = "", delta: str = "", delta_dir: str = "neu", tooltip: str = "") -> None:
     """Render a styled KPI card. color: 'blue'|'green'|'red'|'yellow'|''."""
-    tip_html = (f' <span title="{tooltip}" style="cursor:help;color:#475569;font-size:0.65rem;'
-                f'vertical-align:middle">ⓘ</span>') if tooltip else ""
+    tip_html = (
+        f'<span class="kpi-tooltip">'
+        f'<span class="kpi-tooltip-icon">i</span>'
+        f'<span class="kpi-tooltip-text">{tooltip}</span>'
+        f'</span>'
+    ) if tooltip else ""
     delta_html = f'<div class="kpi-delta {delta_dir}">{delta}</div>' if delta else ""
     st.markdown(
         f'<div class="kpi-card">'

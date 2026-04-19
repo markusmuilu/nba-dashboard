@@ -30,6 +30,22 @@ def render(hist: pd.DataFrame) -> None:
     metrics_df = pd.DataFrame(rows)
 
     section_header("Metrics by Version")
+    with st.expander("📖 What do these metrics mean? (click to expand)"):
+        st.markdown("""
+**Accuracy** — The simplest measure: out of every game the model predicted, what % did it get right?
+*Example: 62% accuracy means 62 out of 100 predictions were correct.*
+
+**Precision** — When the model predicted a home win, how often was it actually right?
+High precision = when the model says "home wins", you can trust it.
+*Example: 70% precision means 7 out of every 10 home-win predictions were correct.*
+
+**Recall** — Out of all the games where the home team actually won, how many did the model correctly predict?
+High recall = the model catches most home wins and doesn't miss them.
+*Example: 60% recall means the model spotted 6 out of every 10 real home wins.*
+
+**F1 Score** — A single number that balances precision and recall. Useful when you want both to be good, not just one.
+*Think of it as the average of precision and recall, penalising large gaps between the two.*
+        """)
     st.dataframe(metrics_df, width='stretch', hide_index=True)
 
     melted = metrics_df.melt(id_vars="Version", value_vars=["Accuracy", "F1", "Precision", "Recall"])
@@ -125,6 +141,18 @@ def render(hist: pd.DataFrame) -> None:
             npv = tn / (tn + fn) * 100 if (tn + fn) else 0
             st.plotly_chart(fig_cm, width='stretch')
             st.caption(f"PPV (precision): {ppv:.1f}%  ·  NPV: {npv:.1f}%  ·  {total_cm} games")
+            with st.expander("📖 What do TP / FP / FN / TN mean?"):
+                st.markdown("""
+**TP – True Positive** · Predicted home win ✓ and home team actually won ✓
+
+**FP – False Positive** · Predicted home win ✓ but away team won ✗ *(false alarm)*
+
+**FN – False Negative** · Predicted away win ✗ but home team actually won ✗ *(missed it)*
+
+**TN – True Negative** · Predicted away win ✓ and away team actually won ✓
+
+*Ideal matrix: large TP and TN, small FP and FN.*
+                """)
 
     divider()
 

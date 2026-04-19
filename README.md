@@ -6,8 +6,6 @@ Cloudflare R2.
 
 ## Project Evolution
 
-This dashboard is the **V2 analytics layer** for the NBA prediction project.
-
 ### V1 — Power BI (Nov 2025 – Apr 2026)
 The original analytics layer was a Power BI dashboard embedded directly in the portfolio website. It visualised the same prediction data but required a Power BI Pro licence.
 
@@ -22,34 +20,92 @@ The Streamlit dashboard is embedded via iframe in the portfolio at [markusmuilu.
 
 ---
 
+## Project structure
+
+```
+nba-dashboard/
+├── app.py                      # Entry point: page config, sidebar, tab routing
+├── requirements.txt
+│
+├── config/
+│   └── constants.py            # Model version mapping, season type logic, chart events
+│
+├── data/
+│   └── loader.py               # R2 client, data normalisation, better-record baseline, caching
+│
+├── ui/
+│   ├── styles.py               # All CSS injected into Streamlit
+│   ├── components.py           # kpi(), section_header(), divider(), insight(), profit()
+│   └── charts.py               # PLOTLY_LAYOUT, annotate_chart()
+│
+└── tabs/
+    ├── overview.py             # Tab 1 — Overview
+    ├── model_performance.py    # Tab 2 — Model Performance
+    ├── teams.py                # Tab 3 — Teams
+    ├── upset_analysis.py       # Tab 4 — Upset Analysis
+    └── odds_betting.py         # Tab 5 — Odds & Betting
+```
+
+---
+
 ## Tabs
 
 | # | Tab | What it shows |
 |---|-----|---------------|
-| 1 | **Overview** | KPIs, rolling accuracy, today's predictions, full history table |
-| 2 | **Model Performance** | Classification metrics by version, calibration chart, confusion matrix, baseline comparison |
+| 1 | **Overview** | KPIs, 7-day rolling accuracy, today's predictions, full paginated history |
+| 2 | **Model Performance** | Classification metrics by version with plain-English explanations, calibration chart, confusion matrix with TP/FP/FN/TN guide, baseline comparison |
 | 3 | **Teams** | Per-team accuracy, P&L, ROI, form guide, H2H breakdown, prediction history with odds |
-| 4 | **Upset Analysis** | Favourite vs underdog model accuracy, implied probability scatter, upset KPIs |
-| 5 | **Odds & Betting** | Flat-stake P&L simulation, cumulative profit chart, drawdown, monthly summary |
+| 4 | **Upset Analysis** | Favourite vs underdog accuracy, implied probability scatter, confidence vs upset rate |
+| 5 | **Odds & Betting** | Flat-stake P&L simulation for 5 strategies, cumulative profit chart with bucket filter and crosshair hover, daily/monthly breakdowns, per-game table |
+
+---
 
 ## Sidebar filters
 
-- **Date range** — restricts all tabs to the selected window
-- **Model version** — multi-select (Logistic reg V1, V2.1, Custom NN V1, V2.2)
-- **Season type** — Regular Season / Play-In / Playoffs
+All five tabs update simultaneously when any filter changes.
+
+- **Model version** — checkboxes, one per version; tick multiple to compare
+- **Confidence range** — slider restricting to predictions in a confidence band
+- **Team** — filter to games involving a specific team
+- **Date range** — restricts to the selected window
+- **Season type** — checkboxes for Regular Season / Play-In / Playoffs; tick multiple to combine
+
+---
+
+## Baselines
+
+The dashboard computes three baselines for comparison against the ML model:
+
+| Baseline | Logic |
+|---|---|
+| **Always home** | Always predicts the home team wins |
+| **Always away** | Always predicts the away team wins |
+| **Better record** | Picks the team with the better cumulative win % going into that game; home team wins ties |
+
+The **Better Record** baseline is evaluated on all resolved games (including games without an ML prediction), while ML metrics only count games where a prediction was made.
+
+---
+
+## Confidence bucket filter
+
+On the Odds & Betting tab, five checkboxes sit directly above the cumulative profit chart (one per confidence tier: 50–60, 61–70, 71–80, 81–90, 90+). Toggling buckets instantly refilters the chart so you can compare strategy performance within any confidence tier. KPIs and tables always reflect the full dataset.
 
 ---
 
 ## Local development
 
 ```bash
-# 1. Install dependencies
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 2. Create a .env file (or fill in .streamlit/secrets.toml)
+# 3. Create a .env file (or fill in .streamlit/secrets.toml)
 cp .env.example .env   # then edit values
 
-# 3. Run
+# 4. Run
 streamlit run app.py
 ```
 
@@ -62,37 +118,23 @@ streamlit run app.py
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret |
 | `R2_BUCKET_NAME` | Bucket name (default: `nbaprediction`) |
 
-For local runs you can put these in a `.env` file (loaded by `python-dotenv`)
-or in `.streamlit/secrets.toml`.  
+For local runs put these in a `.env` file (loaded by `python-dotenv`) or in `.streamlit/secrets.toml`.  
 **Never commit real credentials to git.**
 
 ---
 
 ## Deploying to Streamlit Community Cloud (free)
 
-### Prerequisites
-- A GitHub account
-- A Streamlit Community Cloud account at [streamlit.io/cloud](https://streamlit.io/cloud)
-
-### Steps
-
-1. **Push this folder to GitHub**
+1. **Push to GitHub**
 
    ```bash
-   git init
-   git add .
-   git commit -m "Initial NBA dashboard"
+   git init && git add . && git commit -m "Initial commit"
    gh repo create nba-dashboard --public --source=. --push
    ```
 
-2. **Connect to Streamlit Community Cloud**
-   - Go to [share.streamlit.io](https://share.streamlit.io)
-   - Click **New app**
-   - Select your GitHub repo, branch (`main`), and set the main file path to `app.py`
+2. **Connect at [share.streamlit.io](https://share.streamlit.io)** — New app → select repo → main file: `app.py`
 
-3. **Add secrets**
-   - In the app settings on Streamlit Cloud, open **Secrets**
-   - Paste the following (replacing placeholder values):
+3. **Add secrets** in the app settings:
 
    ```toml
    R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
@@ -101,25 +143,15 @@ or in `.streamlit/secrets.toml`.
    R2_BUCKET_NAME = "nbaprediction"
    ```
 
-4. **Deploy** — Streamlit Cloud will install `requirements.txt` automatically
-   and launch the app.
+4. **Deploy** — Streamlit Cloud installs `requirements.txt` automatically.
 
-### Data refresh
+Data is fetched from R2 on every page load and cached for 5 minutes (`@st.cache_data(ttl=300)`). Force a refresh via the hamburger menu → **Clear cache**.
 
-Data is fetched from R2 on every page load and cached for 5 minutes
-(`@st.cache_data(ttl=300)`).  To force an immediate refresh, open the
-hamburger menu inside the app and click **Clear cache**.
-
-### Keeping `.streamlit/secrets.toml` out of git
-
-Add this to your `.gitignore`:
-
+Keep secrets out of git — add to `.gitignore`:
 ```
 .streamlit/secrets.toml
 .env
 ```
-
-The `config.toml` (dark theme settings) is safe to commit.
 
 ---
 
@@ -127,26 +159,26 @@ The `config.toml` (dark theme settings) is safe to commit.
 
 ### `history/prediction_history.json`
 
-Array of resolved prediction records:
+Array of resolved game records. Games without an ML prediction have `prediction: null` and `prediction_correct: null` — they are included so the Better Record baseline can be computed across the full season.
 
 ```json
 {
-  "team": "CLE",           // home team
-  "opponent": "TOR",       // away team
+  "team": "CLE",                 // home team
+  "opponent": "TOR",             // away team
   "date": "2025-11-13",
-  "prediction": true,      // true = model predicts home win
-  "winner": false,         // true = home team actually won
-  "prediction_correct": false,
-  "confidence": 54.42,
+  "prediction": true,            // true = model predicts home win; null = no ML prediction
+  "winner": false,               // true = home team actually won
+  "prediction_correct": false,   // null when prediction is null
+  "confidence": 54.42,           // model confidence %; null when no prediction
   "gameId": "401810080",
-  "home_odds": 3.16,       // may be null for early records
+  "home_odds": 3.16,             // decimal odds; may be null for early records
   "away_odds": 1.4
 }
 ```
 
 ### `current/current_predictions.json`
 
-Array of today's unresolved predictions (no `winner` / `prediction_correct`):
+Today's unresolved predictions (no `winner` / `prediction_correct`):
 
 ```json
 {
@@ -172,18 +204,18 @@ Array of today's unresolved predictions (no `winner` / `prediction_correct`):
 | 2025-12-15 – 2026-01-08 | Custom NN V1 |
 | 2026-01-09 onwards | Logistic reg V2.2 |
 
-Version change lines are rendered as dotted vertical annotations on the Overview
-rolling accuracy chart and the Odds & Betting cumulative profit chart.
+Version changes are annotated as dotted vertical lines on the rolling accuracy chart and the cumulative profit chart.
 
 ---
 
 ## Betting simulation methodology
 
 - **Stake:** flat €1 per game (only games where both home and away odds are available)
-- **P&L per game:** `odds × €1 − €1` if prediction correct, else `−€1`
+- **P&L per game:** `odds × €1 − €1` if correct, else `−€1`
 - **ROI %:** `net profit ÷ total staked × 100`
-- **Strategies compared:** Model · Against model · Always home · Always favourite
+- **Strategies compared:** Model · Against model · Always home · Always favourite · Better record
 - **Max drawdown:** largest peak-to-trough loss on the cumulative P&L curve
+- **Bucket filter:** cumulative chart can be restricted to any combination of confidence tiers
 
 ---
 
@@ -194,8 +226,6 @@ rolling accuracy chart and the Odds & Betting cumulative profit chart.
 | Regular Season | Oct – mid Apr (before Play-In) |
 | Play-In | ~Apr 14–18 |
 | Playoffs | Apr 19 onwards |
-
-Exact start dates per season:
 
 | Season | Play-In start | Playoffs start |
 |---|---|---|

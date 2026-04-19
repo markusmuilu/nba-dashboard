@@ -46,25 +46,27 @@ section[data-testid="stSidebar"] { background-color: #0a0f1e; border-right: 1px 
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 28px 0 16px 0;
+    margin: 32px 0 18px 0;
 }
 .section-head-bar {
-    width: 4px;
-    height: 22px;
+    width: 5px;
+    height: 26px;
     background: linear-gradient(180deg, #3b82f6, #60a5fa);
     border-radius: 2px;
     flex-shrink: 0;
 }
 .section-head h3 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #e5e7eb;
-    margin: 0;
+    font-size: 1.35rem !important;
+    font-weight: 700 !important;
+    color: #e5e7eb !important;
+    margin: 0 !important;
+    letter-spacing: -0.01em;
 }
 .section-head span {
-    font-size: 0.78rem;
-    color: #64748b;
-    margin-left: 4px;
+    font-size: 1.0rem !important;
+    color: #94a3b8 !important;
+    margin-left: 8px;
+    font-weight: 400;
 }
 
 /* ── KPI cards ── */
@@ -197,12 +199,76 @@ section[data-testid="stSidebar"] { background-color: #0a0f1e; border-right: 1px 
 }
 
 /* ── Tab bar ── */
-button[data-baseweb="tab"] { color: #64748b !important; font-size: 0.88rem !important; }
+button[data-baseweb="tab"] { color: #64748b !important; font-size: 1.1rem !important; font-weight: 500 !important; padding: 14px 24px !important; letter-spacing: -0.01em; }
 button[data-baseweb="tab"][aria-selected="true"] {
     color: #60a5fa !important;
     border-bottom-color: #3b82f6 !important;
+    font-weight: 700 !important;
 }
-div[data-baseweb="tab-list"] { border-bottom-color: rgba(148,163,184,0.12) !important; }
+div[data-baseweb="tab-list"] { border-bottom-color: rgba(148,163,184,0.12) !important; gap: 4px !important; }
+
+/* ── CSS tooltip for KPI info icons ── */
+.kpi-tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+.kpi-tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(59,130,246,0.15);
+    border: 1px solid rgba(59,130,246,0.35);
+    color: #60a5fa;
+    font-size: 0.65rem;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 5px;
+    line-height: 1;
+    transition: background 0.15s, border-color 0.15s;
+}
+.kpi-tooltip:hover .kpi-tooltip-icon {
+    background: rgba(59,130,246,0.3);
+    border-color: #60a5fa;
+}
+.kpi-tooltip-text {
+    visibility: hidden;
+    opacity: 0;
+    background: #0f172a;
+    color: #e5e7eb;
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 8px;
+    padding: 10px 14px;
+    position: absolute;
+    z-index: 9999;
+    bottom: 130%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 230px;
+    font-size: 0.74rem;
+    line-height: 1.55;
+    transition: opacity 0.18s;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    pointer-events: none;
+}
+.kpi-tooltip-text::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(59,130,246,0.3);
+}
+.kpi-tooltip:hover .kpi-tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+/* Ensure KPI card overflow visible so tooltip isn't clipped */
+.kpi-card { overflow: visible !important; }
 
 /* ── Sidebar widgets ── */
 .sidebar-label { font-size: 0.7rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }

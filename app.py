@@ -54,12 +54,19 @@ with st.sidebar:
     <hr style="border:none;height:1px;background:rgba(148,163,184,0.1);margin:8px 0 16px">
     """, unsafe_allow_html=True)
 
-    sel_versions: list[str] = st.multiselect(
-        "Model version",
-        options=all_versions,
-        default=["Logistic reg V2.2"] if "Logistic reg V2.2" in all_versions else all_versions,
-    )
-    conf_range: tuple[int, int] = st.slider("Confidence range (%)", 50, 100, (50, 100))
+    st.markdown('<div style="font-size:0.7rem;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Model version</div>', unsafe_allow_html=True)
+    default_ver = "Logistic reg V2.2"
+    sel_versions: list[str] = [
+        v for v in all_versions
+        if st.checkbox(v, value=(v == default_ver if default_ver in all_versions else True), key=f"ver_{v}")
+    ]
+    if not sel_versions:
+        sel_versions = all_versions
+
+    st.markdown('<hr style="border:none;height:1px;background:rgba(148,163,184,0.08);margin:12px 0">', unsafe_allow_html=True)
+
+    conf_range: tuple[int, int] = st.slider("Confidence range (%)", 50, 100, (50, 100),
+                                             help="Only include predictions where the model's confidence falls in this range.")
 
     team_options = ["All teams"] + all_teams
     sel_team: str = st.selectbox("Team", team_options, index=0,
@@ -74,22 +81,24 @@ with st.sidebar:
     else:
         d_start, d_end = min_date, max_date
 
+    st.markdown('<hr style="border:none;height:1px;background:rgba(148,163,184,0.08);margin:12px 0">', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.7rem;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Season type</div>', unsafe_allow_html=True)
     all_season_types = ["Regular Season", "Play-In", "Playoffs"]
-    sel_season_types: list[str] = st.multiselect(
-        "Season type",
-        options=all_season_types,
-        default=["Regular Season"],
-        help="Regular Season = Oct–mid Apr · Play-In = ~Apr 14-18 · Playoffs = Apr 19+",
-    )
+    sel_season_types: list[str] = [
+        t for t in all_season_types
+        if st.checkbox(t, value=(t == "Regular Season"), key=f"season_{t}")
+    ]
+    if not sel_season_types:
+        sel_season_types = all_season_types
 
     st.markdown('<hr style="border:none;height:1px;background:rgba(148,163,184,0.1);margin:16px 0">', unsafe_allow_html=True)
 
     active = []
-    if sel_versions != all_versions:            active.append(f"{len(sel_versions)} version(s)")
-    if conf_range != (50, 100):                 active.append(f"conf {conf_range[0]}-{conf_range[1]}%")
-    if sel_team != "All teams":                 active.append(sel_team)
-    if (d_start, d_end) != (min_date, max_date): active.append("date")
-    if sel_season_types != all_season_types:    active.append(" · ".join(sel_season_types))
+    if sorted(sel_versions) != sorted(all_versions): active.append(f"{len(sel_versions)} version(s)")
+    if conf_range != (50, 100):                      active.append(f"conf {conf_range[0]}–{conf_range[1]}%")
+    if sel_team != "All teams":                      active.append(sel_team)
+    if (d_start, d_end) != (min_date, max_date):    active.append("date range")
+    if sorted(sel_season_types) != sorted(all_season_types): active.append(" · ".join(sel_season_types))
 
     if active:
         st.markdown(f'<div style="font-size:0.72rem;color:#475569">Active filters: <span style="color:#60a5fa">{" · ".join(active)}</span></div>', unsafe_allow_html=True)

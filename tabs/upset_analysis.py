@@ -52,8 +52,8 @@ def render(hist: pd.DataFrame) -> None:
 
     with col_left:
         section_header("Implied Probability vs Model Confidence")
-        st.caption("Each dot = one game. X = market-implied win probability for predicted team. "
-                   "Y = model confidence. Green = correct, red = incorrect.")
+        st.caption("Each dot = one game. X-axis = market-implied win probability for the predicted team. "
+                   "Y-axis = model confidence. Green = correct prediction, red = incorrect.")
         scatter_df = odds_hist.copy()
         fig_sc = go.Figure()
         for correct_val, color, label in [(True, "#34d399", "Correct"), (False, "#f87171", "Incorrect")]:
