@@ -5,6 +5,7 @@ from plotly.subplots import make_subplots
 
 from ui.charts import PLOTLY_LAYOUT, annotate_chart
 from ui.components import accuracy_color, divider, insight, kpi, section_header
+from ui.components import profit as calc_profit
 
 
 def render(hist: pd.DataFrame, curr_raw: pd.DataFrame) -> None:
@@ -33,10 +34,20 @@ def render(hist: pd.DataFrame, curr_raw: pd.DataFrame) -> None:
             else:
                 break
 
+    # Model ROI % from games with odds
+    odds_hist = ml_hist.dropna(subset=["home_odds", "away_odds"])
+    if len(odds_hist):
+        model_pnl = odds_hist.apply(
+            lambda r: calc_profit(1, r["home_odds"] if r["prediction"] else r["away_odds"], r["prediction_correct"]), axis=1
+        ).sum()
+        roi_model: float | None = model_pnl / len(odds_hist) * 100
+    else:
+        roi_model = None
+
     n_today = len(curr_raw)
 
     section_header("Key Metrics", f"· {total:,} predictions · filtered view")
-    c = st.columns(6)
+    c = st.columns(7)
     with c[0]: kpi("Running since", earliest)
     with c[1]: kpi("Latest prediction", latest)
     with c[2]: kpi("Overall accuracy", f"{accuracy:.1f}%",
@@ -47,6 +58,13 @@ def render(hist: pd.DataFrame, curr_raw: pd.DataFrame) -> None:
     with c[5]: kpi("Current streak",
                    f"{streak_val}{streak_type}",
                    color="green" if streak_type == "W" else "red")
+    with c[6]:
+        if roi_model is not None:
+            kpi("Model ROI %", f"{roi_model:+.1f}%",
+                color="green" if roi_model > 0 else "red",
+                tooltip="Return on investment from €1 flat-stake betting on model picks (games with odds only).")
+        else:
+            kpi("Model ROI %", "—")
 
     if total:
         gap = accuracy - home_win_pct
