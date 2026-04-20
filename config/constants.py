@@ -39,7 +39,7 @@ PLAYIN_STARTS: dict[int, pd.Timestamp] = {
 }
 PLAYOFF_STARTS: dict[int, pd.Timestamp] = {
     2025: pd.Timestamp("2025-04-19"),
-    2026: pd.Timestamp("2026-04-19"),
+    2026: pd.Timestamp("2026-04-18"),
 }
 
 
@@ -67,5 +67,6 @@ ALL_EVENTS: list[tuple[str, str, str]] = [
     ("2026-02-06", "Trade deadline",   "#f472b6"),
     ("2026-02-13", "All-Star break",   "#94a3b8"),
     ("2026-04-13", "Reg. season ends", "#64748b"),
-    ("2026-04-14", "Playoffs start",   "#22d3ee"),
+    ("2026-04-14", "Play-In start",    "#22d3ee"),
+    ("2026-04-18", "Playoffs start",   "#f97316"),
 ]
