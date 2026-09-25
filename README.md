@@ -1,15 +1,15 @@
 # NBA Prediction Analytics Dashboard
 
 A Streamlit dashboard for analysing NBA game predictions, model performance,
-team stats, upset patterns, and betting simulation — backed by data stored in
+team stats, upset patterns, and betting simulation, backed by data stored in
 Cloudflare R2.
 
 ## Project Evolution
 
-### V1 — Power BI (Nov 2025 – Apr 2026)
+### V1: Power BI (Nov 2025 – Apr 2026)
 The original analytics layer was a Power BI dashboard embedded directly in the portfolio website. It visualised the same prediction data but required a Power BI Pro licence.
 
-### V2 — Streamlit (Apr 2026–present)
+### V2: Streamlit (Apr 2026–present)
 When the Power BI free trial ended, the dashboard was rebuilt from scratch in Streamlit. Benefits:
 - Permanently free on Streamlit Community Cloud
 - Full code ownership and version control
@@ -39,11 +39,11 @@ nba-dashboard/
 │   └── charts.py               # PLOTLY_LAYOUT, annotate_chart()
 │
 └── tabs/
-    ├── overview.py             # Tab 1 — Overview
-    ├── model_performance.py    # Tab 2 — Model Performance
-    ├── teams.py                # Tab 3 — Teams
-    ├── upset_analysis.py       # Tab 4 — Upset Analysis
-    └── odds_betting.py         # Tab 5 — Odds & Betting
+    ├── overview.py             # Tab 1: Overview
+    ├── model_performance.py    # Tab 2: Model Performance
+    ├── teams.py                # Tab 3: Teams
+    ├── upset_analysis.py       # Tab 4: Upset Analysis
+    └── odds_betting.py         # Tab 5: Odds & Betting
 ```
 
 ---
@@ -64,11 +64,11 @@ nba-dashboard/
 
 All five tabs update simultaneously when any filter changes.
 
-- **Model version** — checkboxes, one per version; tick multiple to compare
-- **Confidence range** — slider restricting to predictions in a confidence band
-- **Team** — filter to games involving a specific team
-- **Date range** — restricts to the selected window
-- **Season type** — checkboxes for Regular Season / Play-In / Playoffs; tick multiple to combine
+- **Model version**: checkboxes, one per version; tick multiple to compare
+- **Confidence range**: slider restricting to predictions in a confidence band
+- **Team**: filter to games involving a specific team
+- **Date range**: restricts to the selected window
+- **Season type**: checkboxes for Regular Season / Play-In / Playoffs; tick multiple to combine
 
 ---
 
@@ -103,7 +103,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Create a .env file (or fill in .streamlit/secrets.toml)
-cp .env.example .env   # then edit values
+#    with the variables in the table below
 
 # 4. Run
 streamlit run app.py
@@ -132,7 +132,7 @@ For local runs put these in a `.env` file (loaded by `python-dotenv`) or in `.st
    gh repo create nba-dashboard --public --source=. --push
    ```
 
-2. **Connect at [share.streamlit.io](https://share.streamlit.io)** — New app → select repo → main file: `app.py`
+2. **Connect at [share.streamlit.io](https://share.streamlit.io)**: New app → select repo → main file: `app.py`
 
 3. **Add secrets** in the app settings:
 
@@ -143,11 +143,11 @@ For local runs put these in a `.env` file (loaded by `python-dotenv`) or in `.st
    R2_BUCKET_NAME = "nbaprediction"
    ```
 
-4. **Deploy** — Streamlit Cloud installs `requirements.txt` automatically.
+4. **Deploy**: Streamlit Cloud installs `requirements.txt` automatically.
 
 Data is fetched from R2 on every page load and cached for 5 minutes (`@st.cache_data(ttl=300)`). Force a refresh via the hamburger menu → **Clear cache**.
 
-Keep secrets out of git — add to `.gitignore`:
+Keep secrets out of git: add to `.gitignore`:
 ```
 .streamlit/secrets.toml
 .env
@@ -159,7 +159,7 @@ Keep secrets out of git — add to `.gitignore`:
 
 ### `history/prediction_history.json`
 
-Array of resolved game records. Games without an ML prediction have `prediction: null` and `prediction_correct: null` — they are included so the Better Record baseline can be computed across the full season.
+Array of resolved game records. Games without an ML prediction have `prediction: null` and `prediction_correct: null`. They are included so the Better Record baseline can be computed across the full season.
 
 ```json
 {
