@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA Prediction Analytics</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #e87ba4; --s5: #4a3aa7;
+    --good: #006300; --bad: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #d55181; --s5: #9085e9;
+      --good: #0ca30c; --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 32px 0 8px; }
+  p, li { color: var(--ink2); max-width: 70ch; }
+  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 20px; }
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); margin-bottom: 20px; flex-wrap: wrap; }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink2); padding: 10px 14px; font: inherit; cursor: pointer; }
+  nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--s1); font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+  .tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 12px 14px; }
+  .tile .v { font-size: 1.6rem; font-weight: 650; }
+  .tile .l { color: var(--muted); font-size: .8rem; }
+  .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 8px; margin: 8px 0; }
+  .note { background: var(--surface); border: 1px solid var(--ring); border-left: 3px solid var(--s2); border-radius: 6px; padding: 10px 14px; margin: 12px 0; color: var(--ink2); }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  .scroll { overflow-x: auto; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+  [hidden] { display: none !important; }
+  footer { margin-top: 40px; color: var(--muted); font-size: .8rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>NBA Prediction Analytics</h1>
+  <p class="sub" id="stamp">Loading…</p>
+  <nav role="tablist">
+    <button role="tab" data-tab="now" aria-selected="true">2026-27 season</button>
+    <button role="tab" data-tab="cmp" aria-selected="false">Model comparison</button>
+    <button role="tab" data-tab="arc" aria-selected="false">2025-26 archive</button>
+  </nav>
+
+  <section id="now"></section>
+  <section id="cmp" hidden></section>
+  <section id="arc" hidden></section>
+
+  <footer>Static page, rebuilt daily by a GitHub Action from the prediction history in Cloudflare R2.
+    Not a betting system: odds are shown for comparison only.</footer>
+</main>
+
+<script src="vendor/plotly-basic.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x, d = 1) => x == null ? "–" : (100 * x).toFixed(d) + "%";
+const num = (x, d = 3) => x == null ? "–" : x.toFixed(d);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const tile = (v, l) => `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+
+function layout(extra = {}) {
+  return Object.assign({
+    margin: { l: 52, r: 16, t: 24, b: 44 }, height: 330,
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { color: css("--ink2"), family: "system-ui, sans-serif", size: 12 },
+    xaxis: { gridcolor: css("--grid"), linecolor: css("--axis"), zerolinecolor: css("--axis") },
+    yaxis: { gridcolor: css("--grid"), linecolor: css("--axis"), zerolinecolor: css("--axis") },
+    legend: { orientation: "h", y: -0.2 }, hovermode: "x unified",
+  }, extra);
+}
+const CFG = { displayModeBar: false, responsive: true };
+function chart(host, traces, lay) {
+  const div = document.createElement("div"); div.className = "card"; host.appendChild(div);
+  // Plotly does not size its own container reliably; give the card the chart's height.
+  div.style.height = (lay.height + 16) + "px";
+  Plotly.newPlot(div, traces, Object.assign({}, lay, { autosize: true, height: lay.height }), CFG);
+}
+
+function runningChart(host, running) {
+  const x = running.map(r => r.date);
+  chart(host, [
+    { x, y: running.map(r => r.cumulative), name: "Cumulative", mode: "lines", line: { color: css("--s1"), width: 2 } },
+    { x, y: running.map(r => r.rolling20), name: "Last 20 games", mode: "lines", line: { color: css("--s2"), width: 1.5 } },
+    { x: [x[0], x[x.length - 1]], y: [0.5, 0.5], name: "Coin flip", mode: "lines", line: { color: css("--muted"), width: 1, dash: "dot" }, hoverinfo: "skip" },
+  ], layout({ yaxis: { tickformat: ".0%", gridcolor: css("--grid"), range: [0.3, 0.9] } }));
+}
+
+function calibrationChart(host, curves) {
+  // curves: [{name, color, points:[{mean_pred, observed, count}]}]
+  const traces = [{ x: [0, 1], y: [0, 1], mode: "lines", name: "Perfect", line: { color: css("--muted"), dash: "dash", width: 1 }, hoverinfo: "skip" }];
+  curves.forEach(c => traces.push({
+    x: c.points.map(p => p.mean_pred), y: c.points.map(p => p.observed), name: c.name, mode: "lines+markers",
+    line: { color: c.color, width: 2 }, marker: { size: 8, line: { color: css("--surface"), width: 2 } },
+    text: c.points.map(p => `${p.count} games`), hovertemplate: "predicted %{x:.2f}, observed %{y:.2f} (%{text})<extra>" + c.name + "</extra>",
+  }));
+  chart(host, traces, layout({ hovermode: "closest", height: 380,
+    xaxis: { title: "Predicted home win probability", range: [0, 1], gridcolor: css("--grid") },
+    yaxis: { title: "Observed home win rate", range: [0, 1], gridcolor: css("--grid") } }));
+}
+
+function gamesTable(rows, n) {
+  const body = rows.slice(0, n).map(g => `<tr><td>${g.date}</td><td>${g.opponent} @ ${g.team}</td>
+    <td>${pct(g.p_home, 0)} home</td><td>${g.home_win ? "home won" : "away won"}</td>
+    <td class="${g.correct ? "good" : "bad"}">${g.correct ? "✓ correct" : "✗ wrong"}</td></tr>`).join("");
+  return `<div class="scroll"><table><tr><th>Date</th><th>Game</th><th>Model</th><th>Result</th><th></th></tr>${body}</table></div>`;
+}
+
+// ── Tab 1: current season ─────────────────────────────────────────────────────
+function renderNow(D) {
+  const S = D.season_now, host = $("now"); host.innerHTML = "";
+  if (S.scores.n === 0) {
+    host.innerHTML = `<div class="note"><strong>No ${D.current_season} regular-season games have been scored yet.</strong>
+      This view fills in on its own once the season starts and the daily job has stored predictions with results.
+      Until then, the <em>2025-26 archive</em> tab shows last season's record of the same model.</div>`;
+    if (S.today.length) host.innerHTML += `<h2>Today's predictions</h2><div class="scroll"><table><tr><th>Game</th><th>Home win probability</th></tr>` +
+      S.today.map(g => `<tr><td>${g.opponent} @ ${g.team}</td><td>${(g.prediction ? g.confidence : 100 - g.confidence).toFixed(0)}%</td></tr>`).join("") + `</table></div>`;
+    return;
+  }
+  host.innerHTML = `<div class="tiles">${tile(S.scores.n, "games scored")}${tile(pct(S.scores.accuracy), "accuracy")}${tile(num(S.scores.brier), "Brier score (coin flip = 0.250)")}${tile(num(S.scores.log_loss), "log loss (coin flip = 0.693)")}</div>`;
+  host.insertAdjacentHTML("beforeend", "<h2>Running accuracy</h2>");
+  runningChart(host, S.running);
+  host.insertAdjacentHTML("beforeend", "<h2>Calibration</h2><p>When the model says 70%, do home teams win about 70% of the time? Points on the dashed line mean yes. " +
+    (S.scores.n < 300 ? "With fewer than 300 games the bins are noisy; do not read much into single points." : "") + "</p>");
+  calibrationChart(host, [{ name: "Production model", color: css("--s1"), points: S.calibration }]);
+  host.insertAdjacentHTML("beforeend", "<h2>Latest games</h2>" + gamesTable(S.games, 40));
+}
+
+// ── Tab 2: model comparison ───────────────────────────────────────────────────
+function renderCmp(D) {
+  const C = D.comparison, host = $("cmp"); host.innerHTML = "";
+  if (!C) { host.innerHTML = "<p>No comparison data in this build.</p>"; return; }
+  const T = C.test, names = C.models;
+  host.innerHTML = `<p>All models were trained on 2020-21 to 2023-24, tuned on 2024-25, and scored once on <strong>${T.season}</strong> (${T.n_games} regular-season games).
+    Lower Brier and log loss are better; accuracy is the share of games where the side with p ≥ 50% won.</p>
+    <div class="note"><strong>Read the roster rows carefully.</strong> "Actual roster" models are told which players played in the game being predicted. That is not known before tip-off, so those rows are optimistic.
+    "Previous-game roster" uses only information available before the game and is the fairer comparison for live use.</div>`;
+
+  const order = ["logreg", "player_model_prev", "player_logreg_prev", "player_model", "player_logreg", "jev_named", "jev_anonymised"].filter(k => T.metrics[k]);
+  const rows = order.map(k => { const m = T.metrics[k];
+    return `<tr><td>${names[k]}</td><td>${pct(m.accuracy)}</td><td>${num(m.brier, 4)}</td><td>${num(m.log_loss, 4)}</td><td>${num(m.ece)}</td></tr>`; }).join("");
+  host.insertAdjacentHTML("beforeend", `<h2>Test season scores</h2><div class="scroll"><table><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Calibration error</th></tr>${rows}
+    <tr><td>Constant (always the home win rate)</td><td>${pct(T.metrics.always_home.accuracy)}</td><td>${num(T.metrics.always_home.brier, 4)}</td><td>${num(T.metrics.always_home.log_loss, 4)}</td><td>–</td></tr></table></div>`);
+
+  const diff = Object.entries(T.paired_vs_logreg).map(([k, b]) =>
+    `<tr><td>${names[k]}</td><td class="${b.mean_diff > 0 ? "good" : "bad"}">${b.mean_diff >= 0 ? "+" : ""}${num(b.mean_diff, 4)}</td><td>[${num(b.ci_low, 4)}, ${num(b.ci_high, 4)}]</td></tr>`).join("");
+  host.insertAdjacentHTML("beforeend", `<h2>Improvement over the production logistic regression</h2>
+    <p>Log loss difference per game with a 95% bootstrap interval. Positive means better than the baseline. An interval that includes 0 is not distinguishable from noise on this many games.</p>
+    <div class="scroll"><table><tr><th>Model</th><th>Mean</th><th>95% interval</th></tr>${diff}</table></div>`);
+
+  host.insertAdjacentHTML("beforeend", "<h2>Calibration on the test season</h2>");
+  const pick = [["logreg", "Logistic regression", "--s1"], ["player_model_prev", "Player model (previous-game roster)", "--s2"],
+                ["player_model", "Player model (actual roster)", "--s3"], ["jev_anonymised", "Jev (anonymised)", "--s5"]];
+  calibrationChart(host, pick.filter(([k]) => C.calibration[k]).map(([k, n, c]) => ({ name: n, color: css(c), points: C.calibration[k] })));
+
+  if (T.odds) {
+    const o = T.odds;
+    const orow = (name, m, b) => `<tr><td>${name}</td><td>${pct(m.accuracy)}</td><td>${num(m.brier, 4)}</td><td>${num(m.log_loss, 4)}</td>` +
+      (b ? `<td>${(100 * b.flat_winner_roi).toFixed(1)}%</td><td>${b.quarter_kelly_final.toFixed(2)}×</td><td>${pct(b.quarter_kelly_max_drawdown, 0)}</td>` : "<td></td><td></td><td></td>") + "</tr>";
+    host.insertAdjacentHTML("beforeend", `<h2>Against the betting market</h2>
+      <p>${o.n_games} games from ${o.first_date} to ${o.last_date} have Pinnacle prices stored by the daily job (taken around midday, not at closing). The market's own de-vigged probability is the benchmark: a model with nothing the market lacks cannot beat it.
+      ROI is a flat one-unit stake on the model's pick; Kelly is a quarter-Kelly bankroll on bets the model rates as positive expected value, starting at 1.</p>
+      <div class="scroll"><table><tr><th>Source</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Flat ROI</th><th>¼ Kelly final</th><th>Max drawdown</th></tr>
+      ${orow("Market (de-vigged)", o.market, null)}
+      ${order.filter(k => o.models[k]).map(k => orow(names[k], o.models[k], o.betting[k])).join("")}</table></div>
+      <div class="note">The "actual roster" rows beat or match the market only because they know who played. Their bankroll figures are not an edge and should not be read as one.
+      The retrospective-threshold warning from the production model still applies to everything here: no confidence cut-off was used.</div>`);
+  }
+  host.insertAdjacentHTML("beforeend", C.jev_available ? "" :
+    `<div class="note"><strong>Jev (TypeSafe AI) has not been run.</strong> The run needs an API key (JEV_API_KEY) that was not available when this was built. The code is in the Predicting-Nba repo (research/jev.py) and the rows will appear here after a run.</div>`);
+}
+
+// ── Tab 3: last season archive ────────────────────────────────────────────────
+function renderArc(D) {
+  const S = D.season_last, host = $("arc"); host.innerHTML = "";
+  host.innerHTML = `<p>The production model's own record on ${D.last_season}: what it predicted on the day, against what happened. ${D.history_range.n_without_prediction} early-season games in the history have a result but no stored prediction and are left out.
+    The model changed during the season (versions below), so the overall figure mixes four models.</p>
+    <div class="tiles">${tile(S.scores.n, "games scored")}${tile(pct(S.scores.accuracy), "accuracy, all versions")}${tile(num(S.scores.brier), "Brier score")}${tile(num(S.scores.log_loss), "log loss")}</div>`;
+  host.insertAdjacentHTML("beforeend", "<h2>Running accuracy</h2>");
+  runningChart(host, S.running);
+
+  const vrows = Object.entries(S.by_version).map(([v, s]) => `<tr><td>${v}</td><td>${s.n}</td><td>${pct(s.accuracy)}</td><td>${num(s.brier, 4)}</td><td>${num(s.log_loss, 4)}</td></tr>`).join("");
+  host.insertAdjacentHTML("beforeend", `<h2>By model version</h2><div class="scroll"><table><tr><th>Version</th><th>Games</th><th>Accuracy</th><th>Brier</th><th>Log loss</th></tr>${vrows}</table></div>`);
+
+  host.insertAdjacentHTML("beforeend", "<h2>Calibration</h2>");
+  calibrationChart(host, [{ name: "Production model, all versions", color: css("--s1"), points: S.calibration }]);
+
+  host.insertAdjacentHTML("beforeend", "<h2>Accuracy by team</h2><p>Share of games involving the team where the model was right.</p>");
+  chart(host, [{ type: "bar", x: S.teams.map(t => t.team), y: S.teams.map(t => t.accuracy), marker: { color: css("--s1") }, textposition: "none",
+    text: S.teams.map(t => `${t.games} games`), hovertemplate: "%{x}: %{y:.1%} (%{text})<extra></extra>" }],
+    layout({ hovermode: "closest", yaxis: { tickformat: ".0%", range: [0.3, 0.9], gridcolor: css("--grid") } }));
+
+  if (S.odds) {
+    const o = S.odds;
+    host.insertAdjacentHTML("beforeend", `<h2>Favourites and underdogs</h2>
+      <p>Among ${o.n} games with stored Pinnacle odds, the model's accuracy was <strong>${pct(o.accuracy_when_picking_favourite)}</strong> when it picked the market favourite (${o.n_picking_favourite} games) and
+      <strong>${pct(o.accuracy_when_picking_underdog)}</strong> when it picked the underdog (${o.n_picking_underdog} games).</p>
+      <h2>Flat-stake result</h2>
+      <p>One unit on the model's pick in every game with odds, from ${o.first_date}: ROI <strong>${(100 * o.roi).toFixed(1)}%</strong> over ${o.n} games.
+      No money was staked; this is a backtest against recorded prices. It is the overall result, not a selected slice.</p>`);
+    chart(host, [{ x: o.cumulative.map(c => c.date), y: o.cumulative.map(c => c.profit), mode: "lines", line: { color: css("--s1"), width: 2 }, name: "Cumulative units" },
+      { x: [o.cumulative[0].date, o.cumulative[o.cumulative.length - 1].date], y: [0, 0], mode: "lines", line: { color: css("--muted"), width: 1, dash: "dot" }, hoverinfo: "skip", showlegend: false }],
+      layout({ yaxis: { title: "Units", gridcolor: css("--grid") }, showlegend: false }));
+  }
+  host.insertAdjacentHTML("beforeend", "<h2>Recent games</h2>" + gamesTable(S.games, 40));
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+const rendered = {};
+function show(tab, D) {
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
+  ["now", "cmp", "arc"].forEach(id => $(id).hidden = id !== tab);
+  if (!rendered[tab]) { ({ now: renderNow, cmp: renderCmp, arc: renderArc })[tab](D); rendered[tab] = true; }  // Plotly needs a visible container
+  window.dispatchEvent(new Event("resize"));
+}
+fetch("data.json", { cache: "no-cache" }).then(r => r.json()).then(D => {
+  $("stamp").textContent = `Data refreshed ${D.generated_at} · history ${D.history_range.first} to ${D.history_range.last}`;
+  document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab, D)));
+  const initial = (location.hash || "#now").slice(1);
+  show(["now", "cmp", "arc"].includes(initial) ? initial : "now", D);
+}).catch(e => { $("stamp").textContent = "Could not load data.json: " + e; });
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Needed to build the static site. The Streamlit app's own requirements stay in requirements.txt.
+boto3
+pandas
+numpy

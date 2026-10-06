@@ -5,3 +5,5 @@
 __pycache__/
 *.py[cod]
 *$py.class
+# Static site build output (rebuilt by the Action)
+site/data.json
