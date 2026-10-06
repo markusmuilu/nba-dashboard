@@ -156,7 +156,7 @@ function renderCmp(D) {
     <div class="note"><strong>Read the roster rows carefully.</strong> "Actual roster" models are told which players played in the game being predicted. That is not known before tip-off, so those rows are optimistic.
     "Previous-game roster" uses only information available before the game and is the fairer comparison for live use.</div>`;
 
-  const order = ["logreg", "player_model_prev", "player_logreg_prev", "player_model", "player_logreg", "jev_named", "jev_anonymised"].filter(k => T.metrics[k]);
+  const order = ["logreg", "player_model_prev", "player_logreg_prev", "jev_named_cal", "jev_anonymised_cal", "jev_named", "jev_anonymised", "player_model", "player_logreg"].filter(k => T.metrics[k]);
   const rows = order.map(k => { const m = T.metrics[k];
     return `<tr><td>${names[k]}</td><td>${pct(m.accuracy)}</td><td>${num(m.brier, 4)}</td><td>${num(m.log_loss, 4)}</td><td>${num(m.ece)}</td></tr>`; }).join("");
   host.insertAdjacentHTML("beforeend", `<h2>Test season scores</h2><div class="scroll"><table><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Calibration error</th></tr>${rows}
@@ -170,7 +170,7 @@ function renderCmp(D) {
 
   host.insertAdjacentHTML("beforeend", "<h2>Calibration on the test season</h2>");
   const pick = [["logreg", "Logistic regression", "--s1"], ["player_model_prev", "Player model (previous-game roster)", "--s2"],
-                ["player_model", "Player model (actual roster)", "--s3"], ["jev_anonymised", "Jev (anonymised)", "--s5"]];
+                ["player_model", "Player model (actual roster)", "--s3"], ["jev_anonymised_cal", "Jev (anonymised, recalibrated)", "--s5"]];
   calibrationChart(host, pick.filter(([k]) => C.calibration[k]).map(([k, n, c]) => ({ name: n, color: css(c), points: C.calibration[k] })));
 
   if (T.odds) {
@@ -186,6 +186,8 @@ function renderCmp(D) {
       <div class="note">The "actual roster" rows beat or match the market only because they know who played. Their bankroll figures are not an edge and should not be read as one.
       The retrospective-threshold warning from the production model still applies to everything here: no confidence cut-off was used.</div>`);
   }
+  if (C.jev_available) host.insertAdjacentHTML("beforeend", `<div class="note"><strong>About the Jev rows.</strong> Jev (TypeSafe AI, jev-1.13.0) is not trained on this data. It was given the same pre-game information as the player model, with the previous-game roster, and asked for a home win probability, once with real team and player names and once anonymised.
+    Its raw probabilities are overconfident (calibration error about 0.11), so the "recalibrated" rows apply a two-number correction fitted on the 2024-25 season only. Real names help the raw probabilities by about 0.017 log loss, but only about 0.002 after recalibration (interval includes zero), so most of that gap is calibration, not memorised results.</div>`);
   host.insertAdjacentHTML("beforeend", C.jev_available ? "" :
     `<div class="note"><strong>Jev (TypeSafe AI) has not been run.</strong> The run needs an API key (JEV_API_KEY) that was not available when this was built. The code is in the Predicting-Nba repo (research/jev.py) and the rows will appear here after a run.</div>`);
 }
