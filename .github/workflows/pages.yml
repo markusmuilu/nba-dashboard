@@ -8,6 +8,7 @@ name: Build and deploy dashboard
 on:
   schedule:
     - cron: "30 10 * * *"   # 10:30 UTC, after the prediction service's 12:00 Helsinki run
+    - cron: "30 21 * * *"   # evening refresh: picks up the day's Finnish results
   workflow_dispatch:
   push:
     branches: [master]
@@ -33,7 +34,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-build.txt
-      - name: Build site/data.json from R2
+      - name: Build site/data.json from R2 and the Finland tab from the federation's results service
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

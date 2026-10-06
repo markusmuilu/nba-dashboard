@@ -217,10 +217,32 @@ def comparison_block(path):
     }
 
 
+def build_finland():
+    """
+    The Finland tab: refresh results from the Finnish Basketball Association's service and refit the rating models.
+    If that fails (the service is down, or blocks the runner), the last committed snapshot is published instead,
+    and the page shows its own timestamp, so stale data is visible as stale.
+    """
+    snapshot = HERE / "site_data" / "finland_snapshot.json"
+    try:
+        from finland.pipeline import build
+        data = build(refresh=True)
+        snapshot.write_text(json.dumps(data, separators=(",", ":"), default=str))
+        source = "live"
+    except Exception as e:
+        print(f"Finland pipeline failed ({type(e).__name__}: {e}); using the committed snapshot")
+        if not snapshot.exists():
+            return
+        data, source = json.loads(snapshot.read_text()), "snapshot"
+    (SITE / "finland.json").write_text(json.dumps(data, separators=(",", ":"), default=str))
+    print(f"Wrote site/finland.json ({source}, generated {data['generated_at']})")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--history", help="local prediction_history.json instead of R2")
     ap.add_argument("--current", help="local current_predictions.json instead of R2")
+    ap.add_argument("--skip-finland", action="store_true", help="do not refresh the Finland tab")
     args = ap.parse_args()
 
     history = json.loads(Path(args.history).read_text()) if args.history else read_r2("history/prediction_history.json")
@@ -234,6 +256,8 @@ def main():
     data = build(history, current, comparison_block(HERE / "site_data" / "model_comparison.json"))
     SITE.mkdir(exist_ok=True)
     (SITE / "data.json").write_text(json.dumps(data, separators=(",", ":")))
+    if not args.skip_finland:
+        build_finland()
     print(f"Wrote site/data.json: {data['history_range']['n']} games, "
           f"{data['season_now']['scores']['n']} in {CURRENT_SEASON}, {data['season_last']['scores']['n']} in {LAST_SEASON}")
 

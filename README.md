@@ -9,6 +9,21 @@ Three views:
   all on the same 2025-26 test season, with a market benchmark where Pinnacle odds were stored.
 - **2025-26 archive**: last season's record of the production model, by version, by team, favourites vs underdogs, flat-stake result.
 
+## Finland tab
+
+Win probabilities for Finnish men's basketball: Korisliiga and I divisioona A and B in one rating model, and II divisioona (M2D)
+in its own. Only team results are used (there is no player data for most of these leagues): a rating per team, updated after every game,
+tuned on 2023-24 and 2024-25 and tested on 2025-26. The page shows upcoming fixtures with win probabilities and expected margins,
+ratings, the backtest and every model variant tried.
+
+- Code: `finland/` (`torneopal.py` client, `scrape.py`, `model.py`, `pipeline.py`). `python -m finland.pipeline` writes `site/finland.json`
+  and refreshes `site_data/finland_snapshot.json`; `build_site.py` does the same, and falls back to the snapshot if the results service is unreachable.
+- Data: the Finnish Basketball Association's results service (tulospalvelu.basket.fi, built on TorneoPal). It is a single-page app that calls a JSON API
+  with a client key that the page's own JavaScript hands to every browser. `finland/torneopal.py` reads that key from the page at run time, sends the headers a
+  browser sends, and makes one request a second with everything cached, so no key is stored in this repository. If the federation objects or changes the
+  service, this tab is the one to switch off: delete the `build_finland()` call in `build_site.py`.
+- The daily workflow runs the pipeline without any secret; the R2 secrets are only for the NBA part.
+
 ## Why it is static
 
 The previous version was a Streamlit app on Streamlit Community Cloud. Free apps there go to sleep after a period

@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NBA Prediction Analytics</title>
 <style>
+  .badge { display: inline-block; font-size: .7rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--ring); color: var(--ink2); white-space: nowrap; }
+  .badge.KL { border-color: var(--s1); color: var(--s1); } .badge.I-A, .badge.I-B { border-color: var(--s3); color: var(--s3); } .badge.M2D { border-color: var(--s4); color: var(--s4); }
+  .pbar { position: relative; height: 18px; min-width: 120px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+  .pbar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--s1); opacity: .85; }
+  .pbar > b { position: absolute; left: 6px; top: 0; font-size: .75rem; line-height: 18px; color: var(--ink); font-weight: 600; text-shadow: 0 0 3px var(--surface); }
+  .seg { display: inline-flex; border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; margin: 4px 0 12px; }
+  .seg button { background: none; border: 0; padding: 6px 14px; font: inherit; color: var(--ink2); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--s1); color: #fff; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 12px 0; }
+  .fact { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 12px 14px; }
+  .fact .t { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; } .fact .v { font-weight: 600; margin-top: 2px; }
+  td.left, th.left { text-align: left; }
   details { margin: 8px 0; } summary { cursor: pointer; color: var(--s1); }
   :root {
     color-scheme: light;
@@ -56,11 +68,13 @@
     <button role="tab" data-tab="now" aria-selected="true">2026-27 season</button>
     <button role="tab" data-tab="cmp" aria-selected="false">Model comparison</button>
     <button role="tab" data-tab="arc" aria-selected="false">2025-26 archive</button>
+    <button role="tab" data-tab="fin" aria-selected="false">Finland 🇫🇮</button>
   </nav>
 
   <section id="now"></section>
   <section id="cmp" hidden></section>
   <section id="arc" hidden></section>
+  <section id="fin" hidden></section>
 
   <footer>Static page, rebuilt daily by a GitHub Action from the prediction history in Cloudflare R2.
     Not a betting system: odds are shown for comparison only.</footer>
@@ -248,19 +262,90 @@ function renderArc(D) {
   host.insertAdjacentHTML("beforeend", "<h2>Recent games</h2>" + gamesTable(S.games, 40));
 }
 
+// ── Tab 4: Finland ────────────────────────────────────────────────────────────
+const LEAGUE_NAME = { KL: "Korisliiga", "I-A": "I divisioona A", "I-B": "I divisioona B", M2D: "II divisioona" };
+const badge = (lg) => `<span class="badge ${lg}">${LEAGUE_NAME[lg] || lg}</span>`;
+const fiDate = (iso) => { const d = new Date(iso.replace(" ", "T")); return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + (iso.length > 10 ? " " + iso.slice(11, 16) : ""); };
+const FAMILY = { elo: "Elo", margin: "Margin rating" };
+const MODE = { final: "final margin", q3: "margin after 3 quarters", half: "halftime margin", mix: "mix of final and 3-quarter margin" };
+
+async function renderFin() {
+  const host = $("fin");
+  host.innerHTML = "<p>Loading…</p>";
+  let F;
+  try { F = await (await fetch("finland.json", { cache: "no-cache" })).json(); }
+  catch (e) { host.innerHTML = "<p>The Finland data could not be loaded.</p>"; return; }
+  let pool = location.hash === "#fin-m2d" ? "m2d" : "national";
+  const draw = () => {
+    const P = F.pools[pool], m = P.metrics, base = P.baseline_test, test = m.test, gain = P.gain_vs_constant_test;
+    host.innerHTML = `<p>Win probabilities for Finnish men's basketball from <strong>team results only</strong>: there is no player data for most of these leagues,
+      so each team gets a rating that is updated after every game. Data: the Finnish Basketball Association's results service, refreshed with the rest of this page.</p>
+      <div class="seg" role="group"><button data-pool="national" aria-pressed="${pool === "national"}">Korisliiga + I divisioona</button><button data-pool="m2d" aria-pressed="${pool === "m2d"}">II divisioona (M2D)</button></div>`;
+    host.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => { pool = b.dataset.pool; draw(); }));
+
+    const ss = P.season_so_far;
+    host.insertAdjacentHTML("beforeend", `<div class="tiles">
+      ${tile(FAMILY[P.chosen.family], "model, " + MODE[P.chosen.margin_mode])}
+      ${tile(pct(test.accuracy), "accuracy on last season (" + test.n + " games)")}
+      ${tile(num(test.log_loss), "log loss, last season (home-win-rate baseline " + num(base.constant.log_loss) + ")")}
+      ${tile(ss.games ? `${ss.correct} / ${ss.games}` : "none yet", "correct so far in 2026-27")}</div>`);
+
+    // A few facts, for fun
+    const f = P.facts, cards = [];
+    const leagues = Object.keys(f.avg_home_margin || {});
+    if (leagues.length) cards.push(`<div class="fact"><div class="t">Home-court advantage, 2025-26</div><div class="v">${leagues.map(l => `${LEAGUE_NAME[l]}: +${f.avg_home_margin[l]} pts (${pct(f.home_win_rate[l], 0)} home wins)`).join("<br>")}</div></div>`);
+    if (P.ratings.length) { const top = P.ratings[0]; cards.push(`<div class="fact"><div class="t">Highest rated right now</div><div class="v">${top.team} ${badge(top.league)}<br><span style="font-weight:400;color:var(--ink2)">${top.rating >= 0 ? "+" : ""}${top.rating} ${P.rating_unit}</span></div></div>`); }
+    if (f.biggest_upset) { const u = f.biggest_upset; cards.push(`<div class="fact"><div class="t">Biggest upset this season</div><div class="v">${u.winner} won ${u.score} (${u.home} vs ${u.away}), given only ${pct(u.winner_probability, 0)}</div></div>`); }
+    const bl = P.by_league_test || {}, best = Object.entries(bl).sort((a, b) => b[1].accuracy - a[1].accuracy)[0];
+    if (best && Object.keys(bl).length > 1) cards.push(`<div class="fact"><div class="t">Most predictable league, 2025-26</div><div class="v">${LEAGUE_NAME[best[0]]}: ${pct(best[1].accuracy)} of games called right</div></div>`);
+    if (cards.length) host.insertAdjacentHTML("beforeend", `<div class="facts">${cards.join("")}</div>`);
+
+    // Upcoming fixtures
+    const up = P.upcoming.map(g => `<tr><td class="left">${fiDate(g.when)}</td><td class="left">${badge(g.league)}</td><td class="left">${g.home} <span style="color:var(--muted)">vs</span> ${g.away}</td>
+        <td><div class="pbar"><i style="width:${(100 * g.p_home).toFixed(0)}%"></i><b>${(100 * g.p_home).toFixed(0)}% home</b></div></td><td>${g.margin >= 0 ? g.home : g.away} by ${Math.abs(g.margin).toFixed(1)}</td></tr>`).join("");
+    host.insertAdjacentHTML("beforeend", `<h2>Next ${P.upcoming.length} games</h2>` + (up ? `<div class="scroll"><table><tr><th class="left">When (Finnish time)</th><th class="left">League</th><th class="left">Game</th><th>Win probability</th><th>Expected margin</th></tr>${up}</table></div>`
+      : "<p>No fixtures in the next three weeks.</p>") + `<p>Probabilities use the ratings as they stand today. They are not updated between now and the game.</p>`);
+
+    // Ratings
+    const maxAbs = Math.max(...P.ratings.map(r => Math.abs(r.rating)), 1);
+    const rt = P.ratings.map((r, i) => `<tr><td>${i + 1}</td><td class="left">${r.team}</td><td class="left">${badge(r.league)}</td>
+      <td>${r.won}-${r.lost}</td><td><div class="pbar"><i style="width:${(50 + 50 * r.rating / maxAbs).toFixed(0)}%;background:${r.rating >= 0 ? "var(--s1)" : "var(--s2)"}"></i><b>${r.rating >= 0 ? "+" : ""}${r.rating}</b></div></td></tr>`).join("");
+    host.insertAdjacentHTML("beforeend", `<h2>Ratings</h2><p>${P.rating_unit === "points" ? (pool === "national" ? "Each rating is how many points better than an average Korisliiga team this team is expected to be on a neutral court. I divisioona teams sit below zero because that league is weaker." : "Each rating is how many points better than an average II divisioona team this team is expected to be on a neutral court. Teams new to the league start at zero.") : "Elo ratings; higher is better."}
+      Teams that have not played yet this season still carry last season's rating, pulled partly back to their league's level.</p>
+      <div class="scroll"><table><tr><th>#</th><th class="left">Team</th><th class="left">League</th><th>2026-27</th><th>Rating</th></tr>${rt}</table></div>`);
+
+    // Backtest
+    host.insertAdjacentHTML("beforeend", `<h2>How good is it? The 2025-26 season</h2>
+      <p>The settings were tuned on 2023-24 and 2024-25 only. 2025-26 was then predicted game by game with ratings that only knew earlier games. It called <strong>${pct(test.accuracy)}</strong> of ${test.n} games right
+      (the team with the better record so far: ${pct(base.record_pick_accuracy)}) and cut log loss from ${num(base.constant.log_loss)} to ${num(test.log_loss)}, a gain of ${num(gain.mean)} per game (95% interval ${num(gain.lo)} to ${num(gain.hi)}).</p>`);
+    calibrationChart(host, [{ name: "This model", color: css("--s1"), points: P.calibration_test }]);
+    const rows = P.combos.map(c => `<tr><td class="left">${FAMILY[c.family]}, ${MODE[c.mode]}${c.chosen ? " <strong>(published)</strong>" : ""}</td><td>${num(c.tune)}</td><td>${num(c.test)}</td><td>${pct(c.test_accuracy)}</td></tr>`).join("");
+    host.insertAdjacentHTML("beforeend", `<details><summary>All ${P.combos.length} model variants tried</summary>
+      <p>Two rating families and four ways of measuring the margin from the quarter scores. The published one is the best on the tuning seasons; the rest are shown so the choice can be judged. Differences between them are small.</p>
+      <div class="scroll"><table><tr><th class="left">Variant</th><th>Tuning log loss</th><th>2025-26 log loss</th><th>2025-26 accuracy</th></tr>${rows}</table></div></details>`);
+
+    // Season so far
+    const rec = P.recent.map(g => `<tr><td class="left">${g.when}</td><td class="left">${badge(g.league)}</td><td class="left">${g.home} vs ${g.away}</td><td>${g.score}</td><td>${pct(g.p_home, 0)} home</td><td class="${g.correct ? "good" : "bad"}">${g.correct ? "✓" : "✗"}</td></tr>`).join("");
+    host.insertAdjacentHTML("beforeend", `<h2>This season so far</h2>` + (rec ? `<div class="scroll"><table><tr><th class="left">Date</th><th class="left">League</th><th class="left">Game</th><th>Score</th><th>Model said</th><th></th></tr>${rec}</table></div>
+      <p>Only a few games have been played, so this says very little yet.</p>` : "<p>No games played yet this season.</p>"));
+    host.insertAdjacentHTML("beforeend", `<footer>Updated ${F.generated_at} (Finnish time). Not a betting system, and no bookmaker prices are used: the odds provider used for the NBA does not cover Finnish basketball.</footer>`);
+  };
+  draw();
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 const rendered = {};
 function show(tab, D) {
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
-  ["now", "cmp", "arc"].forEach(id => $(id).hidden = id !== tab);
-  if (!rendered[tab]) { ({ now: renderNow, cmp: renderCmp, arc: renderArc })[tab](D); rendered[tab] = true; }  // Plotly needs a visible container
+  ["now", "cmp", "arc", "fin"].forEach(id => $(id).hidden = id !== tab);
+  if (!rendered[tab]) { ({ now: renderNow, cmp: renderCmp, arc: renderArc, fin: renderFin })[tab](D); rendered[tab] = true; }  // Plotly needs a visible container
   window.dispatchEvent(new Event("resize"));
 }
 fetch("data.json", { cache: "no-cache" }).then(r => r.json()).then(D => {
   $("stamp").textContent = `Data refreshed ${D.generated_at} · history ${D.history_range.first} to ${D.history_range.last}`;
   document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab, D)));
-  const initial = (location.hash || "#now").slice(1);
-  show(["now", "cmp", "arc"].includes(initial) ? initial : "now", D);
+  const initial = (location.hash || "#now").slice(1).replace(/^fin-.*/, "fin");
+  show(["now", "cmp", "arc", "fin"].includes(initial) ? initial : "now", D);
 }).catch(e => { $("stamp").textContent = "Could not load data.json: " + e; });
 </script>
 </body>
