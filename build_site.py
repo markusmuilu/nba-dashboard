@@ -208,7 +208,8 @@ def comparison_block(path):
     return {
         "models": m["models"],
         "test": {"season": test["season"], "n_games": test["n_games"], "metrics": test["metrics"],
-                 "paired_vs_logreg": test["paired_vs_logreg"], "odds": test.get("odds"),
+                 "paired_vs_logreg": test["paired_vs_logreg"],
+                 "paired_vs_scalars": test.get("paired_vs_scalars", {}), "odds": test.get("odds"),
                  "live_production": test.get("live_production")},
         "validation": {"season": m["splits"]["validation"]["season"], "metrics": m["splits"]["validation"]["metrics"]},
         "calibration": curves,

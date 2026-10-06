@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NBA Prediction Analytics</title>
 <style>
+  details { margin: 8px 0; } summary { cursor: pointer; color: var(--s1); }
   :root {
     color-scheme: light;
     --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
@@ -151,26 +152,38 @@ function renderCmp(D) {
   const C = D.comparison, host = $("cmp"); host.innerHTML = "";
   if (!C) { host.innerHTML = "<p>No comparison data in this build.</p>"; return; }
   const T = C.test, names = C.models;
-  host.innerHTML = `<p>All models were trained on 2020-21 to 2023-24, tuned on 2024-25, and scored once on <strong>${T.season}</strong> (${T.n_games} regular-season games).
-    Lower Brier and log loss are better; accuracy is the share of games where the side with p ≥ 50% won.</p>
-    <div class="note"><strong>Read the roster rows carefully.</strong> "Actual roster" models are told which players played in the game being predicted. That is not known before tip-off, so those rows are optimistic.
-    "Previous-game roster" uses only information available before the game and is the fairer comparison for live use.</div>`;
+  const FAIR = ["logreg", "team_elo", "ridge_prev", "comb_scalars", "player_model_prev", "dl_hf_w12", "dl_seq_w12",
+                "dl_both_w12_pr_wide", "dl_both_w12_pr_wide_league", "jev_named_cal", "jev_anonymised_cal"].filter(k => T.metrics[k]);
+  const OPTIMISTIC = ["ridge_act", "player_model", "dl_both_w12_wide_actual"].filter(k => T.metrics[k]);
+  const nTried = Object.keys(names).length;
 
-  const order = ["logreg", "player_model_prev", "player_logreg_prev", "jev_named_cal", "jev_anonymised_cal", "jev_named", "jev_anonymised", "player_model", "player_logreg"].filter(k => T.metrics[k]);
-  const rows = order.map(k => { const m = T.metrics[k];
-    return `<tr><td>${names[k]}</td><td>${pct(m.accuracy)}</td><td>${num(m.brier, 4)}</td><td>${num(m.log_loss, 4)}</td><td>${num(m.ece)}</td></tr>`; }).join("");
-  host.insertAdjacentHTML("beforeend", `<h2>Test season scores</h2><div class="scroll"><table><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Calibration error</th></tr>${rows}
+  host.innerHTML = `<p>All models were fitted on seasons before 2024-25, tuned on <strong>2024-25</strong>, and scored once on <strong>${T.season}</strong> (${T.n_games} regular-season games).
+    Lower Brier and log loss are better; accuracy is the share of games where the side with p ≥ 50% won.</p>
+    <div class="note"><strong>Read the roster rows carefully.</strong> Rows marked "actual roster" are told which players played in the game being predicted, which is not known before tip-off, so they are optimistic.
+    All other rows use the previous-game roster, which is known before the game.</div>
+    <div class="note"><strong>The production model is a weak baseline.</strong> A plain team Elo rating, one number per team, and a 7-number logistic regression both beat it clearly on log loss.
+    The honest question for the deeper models is therefore whether they beat the <em>simple rating models</em>, and the second interval table below tests exactly that.</div>`;
+
+  const row = (k, extra = "") => { const m = T.metrics[k];
+    return `<tr><td>${names[k]}</td><td>${pct(m.accuracy)}</td><td>${num(m.brier, 4)}</td><td>${num(m.log_loss, 4)}</td><td>${num(m.ece)}</td></tr>`; };
+  host.insertAdjacentHTML("beforeend", `<h2>Test season scores</h2><div class="scroll"><table><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Calibration error</th></tr>
+    ${FAIR.map(k => row(k)).join("")}
+    <tr><td colspan="5" style="text-align:left;color:var(--muted)">Optimistic: actual roster</td></tr>
+    ${OPTIMISTIC.map(k => row(k)).join("")}
     <tr><td>Constant (always the home win rate)</td><td>${pct(T.metrics.always_home.accuracy)}</td><td>${num(T.metrics.always_home.brier, 4)}</td><td>${num(T.metrics.always_home.log_loss, 4)}</td><td>–</td></tr></table></div>`);
 
-  const diff = Object.entries(T.paired_vs_logreg).map(([k, b]) =>
-    `<tr><td>${names[k]}</td><td class="${b.mean_diff > 0 ? "good" : "bad"}">${b.mean_diff >= 0 ? "+" : ""}${num(b.mean_diff, 4)}</td><td>[${num(b.ci_low, 4)}, ${num(b.ci_high, 4)}]</td></tr>`).join("");
+  const diffRows = (src) => FAIR.concat(OPTIMISTIC).filter(k => src[k]).map(k => { const b = src[k];
+    return `<tr><td>${names[k]}</td><td class="${b.mean_diff > 0 ? "good" : "bad"}">${b.mean_diff >= 0 ? "+" : ""}${num(b.mean_diff, 4)}</td><td>[${num(b.ci_low, 4)}, ${num(b.ci_high, 4)}]</td></tr>`; }).join("");
   host.insertAdjacentHTML("beforeend", `<h2>Improvement over the production logistic regression</h2>
     <p>Log loss difference per game with a 95% bootstrap interval. Positive means better than the baseline. An interval that includes 0 is not distinguishable from noise on this many games.</p>
-    <div class="scroll"><table><tr><th>Model</th><th>Mean</th><th>95% interval</th></tr>${diff}</table></div>`);
+    <div class="scroll"><table><tr><th>Model</th><th>Mean</th><th>95% interval</th></tr>${diffRows(T.paired_vs_logreg)}</table></div>`);
+  if (T.paired_vs_scalars && Object.keys(T.paired_vs_scalars).length) host.insertAdjacentHTML("beforeend", `<h2>Improvement over the 7-number rating model</h2>
+    <p>The harder test: the same comparison, against a logistic regression on just seven numbers (team Elo, player Elo, a ridge plus-minus rating, and rest).</p>
+    <div class="scroll"><table><tr><th>Model</th><th>Mean</th><th>95% interval</th></tr>${diffRows(T.paired_vs_scalars)}</table></div>`);
 
   host.insertAdjacentHTML("beforeend", "<h2>Calibration on the test season</h2>");
-  const pick = [["logreg", "Logistic regression", "--s1"], ["player_model_prev", "Player model (previous-game roster)", "--s2"],
-                ["player_model", "Player model (actual roster)", "--s3"], ["jev_anonymised_cal", "Jev (anonymised, recalibrated)", "--s5"]];
+  const pick = [["logreg", "Logistic regression", "--s1"], ["team_elo", "Team Elo", "--s2"], ["comb_scalars", "7-number rating model", "--s3"],
+                ["dl_both_w12_pr_wide_league", "Deep model with ratings", "--s4"], ["jev_named_cal", "Jev (recalibrated)", "--s5"]];
   calibrationChart(host, pick.filter(([k]) => C.calibration[k]).map(([k, n, c]) => ({ name: n, color: css(c), points: C.calibration[k] })));
 
   if (T.odds) {
@@ -182,14 +195,22 @@ function renderCmp(D) {
       ROI is a flat one-unit stake on the model's pick; Kelly is a quarter-Kelly bankroll on bets the model rates as positive expected value, starting at 1.</p>
       <div class="scroll"><table><tr><th>Source</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Flat ROI</th><th>¼ Kelly final</th><th>Max drawdown</th></tr>
       ${orow("Market (de-vigged)", o.market, null)}
-      ${order.filter(k => o.models[k]).map(k => orow(names[k], o.models[k], o.betting[k])).join("")}</table></div>
-      <div class="note">The "actual roster" rows beat or match the market only because they know who played. Their bankroll figures are not an edge and should not be read as one.
-      The retrospective-threshold warning from the production model still applies to everything here: no confidence cut-off was used.</div>`);
+      ${FAIR.concat(OPTIMISTIC).filter(k => o.models[k]).map(k => orow(names[k], o.models[k], o.betting[k])).join("")}</table></div>
+      <div class="note">No fair-roster model reaches the market's log loss, and every quarter-Kelly bankroll ends below its start. The "actual roster" rows are optimistic and their figures are not an edge.
+      No confidence cut-off was used anywhere.</div>`);
   }
-  if (C.jev_available) host.insertAdjacentHTML("beforeend", `<div class="note"><strong>About the Jev rows.</strong> Jev (TypeSafe AI, jev-1.13.0) is not trained on this data. It was given the same pre-game information as the player model, with the previous-game roster, and asked for a home win probability, once with real team and player names and once anonymised.
-    Its raw probabilities are overconfident (calibration error about 0.11), so the "recalibrated" rows apply a two-number correction fitted on the 2024-25 season only. Real names help the raw probabilities by about 0.017 log loss, but only about 0.002 after recalibration (interval includes zero), so most of that gap is calibration, not memorised results.</div>`);
-  host.insertAdjacentHTML("beforeend", C.jev_available ? "" :
-    `<div class="note"><strong>Jev (TypeSafe AI) has not been run.</strong> The run needs an API key (JEV_API_KEY) that was not available when this was built. The code is in the Predicting-Nba repo (research/jev.py) and the rows will appear here after a run.</div>`);
+
+  // Everything that was tried, not just the headline rows.
+  const V = C.validation.metrics;
+  const allKeys = Object.keys(names).filter(k => T.metrics[k]).sort((a, b) => T.metrics[a].log_loss - T.metrics[b].log_loss);
+  host.insertAdjacentHTML("beforeend", `<h2>Every variant tried (${nTried})</h2>
+    <details><summary>Show the full table, sorted by test log loss</summary>
+    <p>All of these were scored; choices were made on the validation columns only. Test numbers are shown for completeness and were not used to pick anything.</p>
+    <div class="scroll"><table><tr><th>Model</th><th>Val log loss</th><th>Test log loss</th><th>Test accuracy</th></tr>
+    ${allKeys.map(k => `<tr><td>${names[k]}</td><td>${V[k] ? num(V[k].log_loss, 4) : "–"}</td><td>${num(T.metrics[k].log_loss, 4)}</td><td>${pct(T.metrics[k].accuracy)}</td></tr>`).join("")}</table></div></details>`);
+
+  host.insertAdjacentHTML("beforeend", `<div class="note"><strong>About the Jev rows.</strong> Jev (TypeSafe AI, jev-1.13.0) is not trained on this data. It was given the same pre-game information as the player model, with the previous-game roster, and asked for a home win probability, with real names and anonymised.
+    Its raw probabilities are overconfident, so the "recalibrated" rows apply a two-number correction fitted on 2024-25 only. Real names help the raw probabilities by about 0.017 log loss but only about 0.002 after recalibration, so most of that gap is calibration, not memorised results.</div>`);
 }
 
 // ── Tab 3: last season archive ────────────────────────────────────────────────
