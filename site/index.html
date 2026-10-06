@@ -121,17 +121,23 @@ function gamesTable(rows, n) {
 }
 
 // ── Tab 1: current season ─────────────────────────────────────────────────────
+function todayTable(today) {
+  if (!today.length) return "";
+  return `<h2>Today's predictions</h2><div class="scroll"><table><tr><th>Game</th><th>Home win probability</th></tr>` +
+    today.map(g => `<tr><td>${g.opponent} @ ${g.team}</td><td>${(g.prediction ? g.confidence : 100 - g.confidence).toFixed(0)}%</td></tr>`).join("") + `</table></div>`;
+}
+
 function renderNow(D) {
   const S = D.season_now, host = $("now"); host.innerHTML = "";
   if (S.scores.n === 0) {
     host.innerHTML = `<div class="note"><strong>No ${D.current_season} regular-season games have been scored yet.</strong>
       This view fills in on its own once the season starts and the daily job has stored predictions with results.
       Until then, the <em>2025-26 archive</em> tab shows last season's record of the same model.</div>`;
-    if (S.today.length) host.innerHTML += `<h2>Today's predictions</h2><div class="scroll"><table><tr><th>Game</th><th>Home win probability</th></tr>` +
-      S.today.map(g => `<tr><td>${g.opponent} @ ${g.team}</td><td>${(g.prediction ? g.confidence : 100 - g.confidence).toFixed(0)}%</td></tr>`).join("") + `</table></div>`;
+    host.insertAdjacentHTML("beforeend", todayTable(S.today));
     return;
   }
   host.innerHTML = `<div class="tiles">${tile(S.scores.n, "games scored")}${tile(pct(S.scores.accuracy), "accuracy")}${tile(num(S.scores.brier), "Brier score (coin flip = 0.250)")}${tile(num(S.scores.log_loss), "log loss (coin flip = 0.693)")}</div>`;
+  host.insertAdjacentHTML("beforeend", todayTable(S.today));
   host.insertAdjacentHTML("beforeend", "<h2>Running accuracy</h2>");
   runningChart(host, S.running);
   host.insertAdjacentHTML("beforeend", "<h2>Calibration</h2><p>When the model says 70%, do home teams win about 70% of the time? Points on the dashed line mean yes. " +
