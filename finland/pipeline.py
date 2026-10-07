@@ -27,6 +27,7 @@ LABELS = {"national": "Korisliiga and I divisioona", "m2d": "II divisioona (M2D)
 LEAGUE_NAMES = {"KL": "Korisliiga", "I-A": "I divisioona A", "I-B": "I divisioona B", "M2D": "II divisioona"}
 N_SEARCH = 1500
 UPCOMING_DAYS = 21
+FOCUS_TEAM = "Aalto-Basket"      # marked with a star on the page and given its own card; set to None to switch off
 
 
 def paired_gain(y, p_base, p_new, n_boot=2000, seed=0):
@@ -128,6 +129,20 @@ def run_pool(pool, now):
         facts["biggest_upset"] = {"winner": winner, "home": u.home, "away": u.away, "score": f"{int(u.home_pts)}-{int(u.away_pts)}",
                                   "winner_probability": round(float(u.winner_p), 3), "league": u.league, "date": u["when"].strftime("%Y-%m-%d")}
     result["facts"] = facts
+
+    # One team to follow: its rank, record and next games, wherever they fall
+    result["focus"] = None
+    if FOCUS_TEAM:
+        names_in_ratings = [r["team"] for r in result["ratings"]]
+        if FOCUS_TEAM in names_in_ratings:
+            i = names_in_ratings.index(FOCUS_TEAM)
+            row = result["ratings"][i]
+            mine = out[(~out.finished) & ((out.home == FOCUS_TEAM) | (out.away == FOCUS_TEAM)) & (out["when"] >= pd.Timestamp(now.replace(tzinfo=None) - timedelta(hours=3)))].sort_values("when")
+            result["focus"] = {"team": FOCUS_TEAM, "rank": i + 1, "of": len(names_in_ratings), "rating": row["rating"],
+                               "won": row["won"], "lost": row["lost"], "league": row["league"],
+                               "next": [{"when": r.when.strftime("%Y-%m-%d %H:%M"), "home": r.home, "away": r.away,
+                                         "p_win": round(float(r.p_home if r.home == FOCUS_TEAM else 1 - r.p_home), 3),
+                                         "venue": "home" if r.home == FOCUS_TEAM else "away"} for r in mine.head(3).itertuples()]}
     return result
 
 
