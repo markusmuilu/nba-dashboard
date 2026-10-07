@@ -27,7 +27,7 @@ LABELS = {"national": "Korisliiga and I divisioona", "m2d": "II divisioona (M2D)
 LEAGUE_NAMES = {"KL": "Korisliiga", "I-A": "I divisioona A", "I-B": "I divisioona B", "M2D": "II divisioona"}
 N_SEARCH = 1500
 UPCOMING_DAYS = 21
-FOCUS_TEAM = "Aalto-Basket"      # marked with a star on the page and given its own card; set to None to switch off
+FOCUS_TEAM = None            # a team to mark with a star and a card on the page; None = off
 
 
 def paired_gain(y, p_base, p_new, n_boot=2000, seed=0):
